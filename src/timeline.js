@@ -1,9 +1,11 @@
 /* The timeline: a ruler with the playhead (and a held action's loop), a row per part (opened up into
    one row per property), rows for eyes, mouth, expression, parts in front, sounds and effects.
 
-   Keys: click to select (Shift adds), Shift/Ctrl+drag on empty space to box-select keys across rows,
-   drag to move (snaps to 10 ms, Alt for 1 ms), right-click for easing, double-click a row to add a
-   key there. Part names: click to select, Ctrl/Shift+click to select several. Bars: drag to move,
+   Keys (part keys and eyes / mouth / expression keys alike): drag over empty timeline to box-select
+   every key in the box (Shift or Ctrl adds to the selection), click a key to select it (Shift adds),
+   drag any selected key to move them all (snaps to 10 ms, Alt for 1 ms), right-click for easing,
+   double-click a row to add a key there. A click on empty timeline moves the playhead; drag the ruler
+   to scrub. Part names: click to select, Ctrl/Shift+click to select several. Bars: drag to move,
    drag an end to resize. */
 (function (S) {
   const PT = window.PT;
@@ -12,6 +14,9 @@
   const TICKS = [50, 100, 200, 250, 500, 1000, 2000, 5000, 10000, 20000];
   const keyId = (part, prop, t) => `${part}|${prop}|${t}`;
   const parseKey = (s) => { const [part, prop, t] = s.split('|'); return { part, prop, t: +t }; };
+  // eyes / mouth / expression keys are selected like part keys, as 'state:<track>|v|<t>'
+  const stateKey = (name, t) => keyId('state:' + name, 'v', t);
+  const isState = (k) => k.part.startsWith('state:');
 
   const Timeline = {
     root: null, head: null, body: null, lane: null, line: null, headLine: null,
@@ -49,6 +54,29 @@
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         if (onUp) onUp(ev, moved);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    },
+
+    /* Pressing on empty timeline: a drag draws a box that selects the keys in it, a click moves the playhead */
+    laneDown(e, onLane) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const x0 = e.clientX, y0 = e.clientY;
+      const move = (ev) => {
+        if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        this.boxSelect(e, ev);
+      };
+      const up = (ev) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        S.App.pause();
+        if (onLane && !ev.shiftKey && !ev.ctrlKey) onLane(ev);
+        else if (!ev.shiftKey && !ev.ctrlKey && (S.App.sel.keys.size || S.App.sel.item)) { S.App.sel.keys = new Set(); S.App.sel.item = null; S.App.refresh(); }
+        S.App.seek(this.snap(this.tAt(ev.clientX), ev));
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
@@ -135,12 +163,7 @@
 
     row({ cls = '', label = '', tw = null, title = '', onLabel = null, addKey = null, onLane = null, onDbl = null }) {
       const lane = el('div', { class: 'tl-lane' });
-      lane.addEventListener('pointerdown', (e) => {
-        if (e.target !== lane) return;
-        if (e.button === 0 && (e.shiftKey || e.ctrlKey || e.metaKey)) { this.boxSelect(e); return; }
-        if (onLane) onLane(e);
-        this.scrub(e);
-      });
+      lane.addEventListener('pointerdown', (e) => { if (e.target === lane) this.laneDown(e, onLane); });
       if (onDbl) lane.addEventListener('dblclick', (e) => { if (e.target === lane) onDbl(this.snap(this.tAt(e.clientX), e), e); });
       const lab = el('div', { class: 'tl-label', title, onclick: onLabel },
         tw === null ? null : el('span', { class: 'tw' }, tw),
@@ -151,9 +174,7 @@
 
     section(label) {
       const lane = el('div', { class: 'tl-lane' });
-      lane.addEventListener('pointerdown', (e) => {
-        if (e.button === 0 && (e.shiftKey || e.ctrlKey || e.metaKey)) this.boxSelect(e); else this.scrub(e);
-      });
+      lane.addEventListener('pointerdown', (e) => { if (e.target === lane) this.laneDown(e, null); });
       return el('div', { class: 'tl-row section' }, el('div', { class: 'tl-label' }, label), lane);
     },
 
@@ -212,7 +233,7 @@
           title: name === 'expression' ? 'One of the avatar\'s expressions while the action plays' : `Override the ${name} picture`,
           onDbl: (t) => S.App.addStateKey(name, t),
         });
-        for (const k of p.states[name]) lane.append(this.stateChip(name, k));
+        for (const k of p.states[name]) lane.append(this.keyChip(name, k));
         if (!p.states[name].length) lane.append(el('span', { class: 'tl-empty' }, 'double-click to add'));
         out.push(row);
       }
@@ -250,13 +271,19 @@
       const sel = S.App.sel.keys;
       const on = items.some((k) => sel.has(k));
       const d = el('div', { class: `tl-key ${cls} ${on ? 'sel' : ''}`, style: { left: this.x(t) + 'px' }, title: `${t} ms` });
-      d.dataset.items = items.join(',');
-      d.addEventListener('pointerdown', (e) => {
+      this.keyEvents(d, t, items, part);
+      return d;
+    },
+
+    // select / drag / right-click a key element (a diamond, or a face-key chip)
+    keyEvents(elm, t, items, part) {
+      elm.dataset.items = items.join(',');
+      elm.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
         if (e.button === 2) return;
         const keys = S.App.sel.keys;
-        if (e.shiftKey) { const all = items.every((k) => keys.has(k)); for (const k of items) all ? keys.delete(k) : keys.add(k); } else if (!items.every((k) => keys.has(k))) S.App.sel.keys = new Set(items);
-        S.App.selectPart(part, true);
+        if (e.shiftKey || e.ctrlKey) { const all = items.every((k) => keys.has(k)); for (const k of items) all ? keys.delete(k) : keys.add(k); } else if (!items.every((k) => keys.has(k))) S.App.sel.keys = new Set(items);
+        if (part) S.App.selectPart(part, true); else this.selectionChanged();
         S.App.seek(t);
         const orig = [...S.App.sel.keys].map(parseKey);
         this.track(e, (ev, dt) => {
@@ -265,48 +292,69 @@
           let moved = [];
           S.App.dragMove((q) => { moved = this.moveKeys(q, orig, dt); });
           S.App.sel.keys = new Set(moved.map((k) => keyId(k.part, k.prop, k.t)));
+          this.selectionChanged(true);
           S.App.seek(Math.max(0, Math.min(this.d, t + dt)));
         }, () => { if (this.dragging) { this.dragging = false; S.App.dragEnd(); } else S.App.refresh(); });
       });
-      d.addEventListener('contextmenu', (e) => {
+      elm.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         if (!items.some((k) => S.App.sel.keys.has(k))) S.App.sel.keys = new Set(items);
-        S.App.refresh();
+        this.selectionChanged();
         this.keyMenu(e.clientX, e.clientY);
       });
-      return d;
     },
 
-    /* Shift/Ctrl+drag on empty space: a box that adds every key inside it to the selection */
-    boxSelect(e) {
-      e.preventDefault();
+    // one face key alone shows its value in the Inspector; anything else shows the keys card
+    selectionChanged(quiet = false) {
+      const keys = [...S.App.sel.keys].map(parseKey);
+      S.App.sel.item = keys.length === 1 && isState(keys[0]) ? { kind: 'state', name: keys[0].part.slice(6), t: keys[0].t } : null;
+      if (!quiet) S.App.refresh();
+    },
+
+    /* A box from where the drag started: every key it touches is selected (Shift or Ctrl: added to
+       the keys already selected). The list scrolls when the box reaches its top or bottom. */
+    boxSelect(e, first) {
       const root = this.root.getBoundingClientRect();
       const box = el('div', { class: 'tl-box' });
       this.root.append(box);
-      const x0 = e.clientX, y0 = e.clientY;
-      const before = new Set(S.App.sel.keys);
-      let inside = [];
-      const move = (ev) => {
-        const l = Math.min(x0, ev.clientX), r = Math.max(x0, ev.clientX), t = Math.min(y0, ev.clientY), b = Math.max(y0, ev.clientY);
-        Object.assign(box.style, { left: l - root.left + 'px', top: t - root.top + 'px', width: r - l + 'px', height: b - t + 'px' });
+      const add = e.shiftKey || e.ctrlKey || e.metaKey;
+      const before = add ? new Set(S.App.sel.keys) : new Set();
+      const x0 = e.clientX, y0 = e.clientY + this.body.scrollTop;   // the start, in the list's own space
+      let inside = [], last = first || e, timer = null;
+      const draw = () => {
+        const ev = last, sy = this.body.scrollTop, ys = y0 - sy;
+        const l = Math.min(x0, ev.clientX), r = Math.max(x0, ev.clientX), t = Math.min(ys, ev.clientY), b = Math.max(ys, ev.clientY);
+        const bodyR = this.body.getBoundingClientRect();
+        const ct = Math.max(t, bodyR.top), cb = Math.min(b, bodyR.bottom);
+        Object.assign(box.style, { left: l - root.left + 'px', top: ct - root.top + 'px', width: r - l + 'px', height: Math.max(0, cb - ct) + 'px' });
         inside = [];
-        for (const d of this.body.querySelectorAll('.tl-key')) {
-          const q = d.getBoundingClientRect(), cx = q.left + q.width / 2, cy = q.top + q.height / 2;
-          const hit = cx >= l && cx <= r && cy >= t && cy <= b;
-          d.classList.toggle('sel', hit || d.dataset.items.split(',').some((k) => before.has(k)));
-          if (hit) inside.push(...d.dataset.items.split(','));
+        for (const d of this.body.querySelectorAll('[data-items]')) {
+          const q = d.getBoundingClientRect();
+          // touched: the box overlaps the key
+          const hit = q.right >= l && q.left <= r && q.bottom >= t && q.top <= b;
+          const items = d.dataset.items.split(',');
+          d.classList.toggle('sel', hit || items.some((k) => before.has(k)));
+          if (hit) inside.push(...items);
         }
       };
+      const scroll = () => {
+        const bodyR = this.body.getBoundingClientRect();
+        const dy = last.clientY < bodyR.top + 16 ? -12 : last.clientY > bodyR.bottom - 16 ? 12 : 0;
+        if (dy) { this.body.scrollTop += dy; draw(); }
+      };
+      const move = (ev) => { last = ev; draw(); };
       const up = () => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
+        clearInterval(timer);
         box.remove();
         S.App.sel.keys = new Set([...before, ...inside]);
-        S.App.sel.item = null;
-        S.App.refresh();
+        this.selectionChanged();
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
+      timer = setInterval(scroll, 30);
+      draw();
     },
 
     // move keys by dt ms; keys moving the same way are done in the right order so none land on another
@@ -315,20 +363,31 @@
       const out = [];
       for (const k of sorted) {
         const to = Math.max(0, Math.min(q.duration, k.t + dt));
-        if (S.Model.moveKey(q, k.part, k.prop, k.t, to)) out.push({ ...k, t: to });
+        if (isState(k)) {
+          const name = k.part.slice(6), list = q.states[name], key = list && list.find((x) => x.t === k.t);
+          if (!key) continue;
+          q.states[name] = list.filter((x) => x === key || x.t !== to);
+          key.t = to;
+          q.states[name].sort((a, b) => a.t - b.t);
+          out.push({ ...k, t: to });
+        } else if (S.Model.moveKey(q, k.part, k.prop, k.t, to)) out.push({ ...k, t: to });
       }
       return out;
     },
 
     keyMenu(x, y) {
-      const keys = [...S.App.sel.keys].map(parseKey);
+      const all = [...S.App.sel.keys].map(parseKey), keys = all.filter((k) => !isState(k));
       const p = S.App.project;
       const cur = new Set(keys.map((k) => (S.Model.track(p, k.part, k.prop).find((x) => x.t === k.t) || {}).ease));
-      const items = [{ label: 'Ease to the next key' }];
-      for (const e of S.Interp.EASES) {
-        items.push({ text: e, cur: cur.size === 1 && cur.has(e), run: () => S.App.edit((q) => { for (const k of keys) { const key = S.Model.track(q, k.part, k.prop).find((x) => x.t === k.t); if (key) key.ease = e; } }) });
+      const items = [];
+      if (keys.length) {
+        items.push({ label: 'Ease to the next key' });
+        for (const e of S.Interp.EASES) {
+          items.push({ text: e, cur: cur.size === 1 && cur.has(e), run: () => S.App.edit((q) => { for (const k of keys) { const key = S.Model.track(q, k.part, k.prop).find((x) => x.t === k.t); if (key) key.ease = e; } }) });
+        }
+        items.push({ sep: true });
       }
-      items.push({ sep: true }, { text: `Delete ${keys.length > 1 ? keys.length + ' keys' : 'key'}`, run: () => S.App.deleteSelection() });
+      items.push({ text: `Delete ${all.length > 1 ? all.length + ' keys' : 'key'}`, run: () => S.App.deleteSelection() });
       S.App.menu(x, y, items);
     },
 
@@ -352,16 +411,11 @@
       return c;
     },
 
-    stateChip(name, k) {
-      const item = { kind: 'state', name, t: k.t };
-      const c = this.chip(k.t, k.v || 'normal', item, (q, to) => {
-        const key = q.states[name].find((x) => x.t === k.t);
-        if (!key) return;
-        q.states[name] = q.states[name].filter((x) => x === key || x.t !== to);
-        key.t = to;
-        q.states[name].sort((a, b) => a.t - b.t);
-        S.App.sel.item = { kind: 'state', name, t: to };
-      }, k.v ? '' : 'normal');
+    // an eyes / mouth / expression key: selected, dragged and box-selected like any other key
+    keyChip(name, k) {
+      const id = stateKey(name, k.t), on = S.App.sel.keys.has(id);
+      const c = el('div', { class: `tl-chip ${k.v ? '' : 'normal'} ${on ? 'sel' : ''}`, style: { left: this.x(k.t) + 'px' }, title: `${k.v || 'normal'} at ${k.t} ms` }, k.v || 'normal');
+      this.keyEvents(c, k.t, [id], null);
       return c;
     },
 

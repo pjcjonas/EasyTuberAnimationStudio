@@ -10,7 +10,7 @@ The first release.
 - Joint motion (EasyTuber's rig) is still there, one switch away (F / J).
 - Rotate, Move and Scale tools (R, M, S; Shift moves and Alt scales with any tool). Every drag sets a key at the playhead. Paused, the stage shows the pose at full strength; the blend fades show while playing.
 - Pose several parts at once: Ctrl+click parts, or drag a box on the stage. A drag, a typed value, **K** or a paste applies to every selected part; turning or scaling a group swings it round the grabbed part's pivot.
-- Timeline with a row per part (open it up for Rotate / Move / Scale), easing per key, box-select keys with Shift+drag, move several keys together, copy and paste.
+- Timeline with a row per part (open it up for Rotate / Move / Scale), easing per key, drag a box over the timeline to select keys across parts and face rows, drag them all together, set their easing or value at once, copy and paste.
 - Eyes, mouth and expression tracks, parts drawn in front, sounds, and effects: sparkles, music notes, motion marks, emoji burst, captions with Streamer.bot values, and your own pictures.
 - Held actions with a loop and a release, tested with Turn on / Turn off.
 - A Strength slider and switches for effects, which show up in EasyTuber's Actions tab.

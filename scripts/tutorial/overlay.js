@@ -251,11 +251,11 @@
     el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: x, clientY: y }));
     await T.wait(350);
   };
-  // Shift+drag a box over the timeline from one screen point to another
+  // drag a box over empty timeline from one screen point to another (selects the keys in it)
   T.boxKeys = async (from, to, ms = 900) => {
     await T.cursorTo(from[0], from[1], 600);
     const lane = document.elementFromPoint(from[0], from[1]);
-    lane.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, shiftKey: true, clientX: from[0], clientY: from[1] }));
+    lane.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: from[0], clientY: from[1] }));
     const t0 = performance.now();
     await new Promise((res) => {
       const step = (now) => {

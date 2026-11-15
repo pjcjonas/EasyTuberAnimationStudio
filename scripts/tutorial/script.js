@@ -115,7 +115,7 @@
         { say: 'Right click a key to choose its easing: how the motion travels from this key to the next. Out Back overshoots a little, which feels bouncy.',
           do: async (T) => { await T.rightClick(T.diamond('armRUpper', 0)); await T.wait(700); await T.click(T.button('outBack', '#ctxMenu')); } },
         { say: 'Double click a row to add a key there, and press Delete to remove the selected keys.' },
-        { say: 'Shift click selects more keys, and Shift drag draws a box around them. Then drag them together, or change their easing in the inspector, all at once.',
+        { say: 'Drag over an empty part of the timeline to draw a box: every key inside it is selected, face keys too. Then drag any of them to move them all, or change their easing in the inspector, all at once.',
           do: async (T) => { const row = T.partRow('armRLower'); T.showRow(row); await T.wait(200); const r = T.partRow('armRLower').getBoundingClientRect(); await T.boxKeys([T.timeX(700), r.top + 2], [T.timeX(1450), r.bottom - 2]); await T.wait(400); T.highlight(T.card('3 keys') || '#inspector .card', 'Selected keys'); await T.wait(2500); T.unhighlight(); } },
         { say: 'Escape clears the selection.', do: async (T) => { await T.key('Escape'); } },
       ],

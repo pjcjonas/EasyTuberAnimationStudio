@@ -182,7 +182,9 @@
     },
 
     keysCard() {
-      const keys = [...S.App.sel.keys].map((s) => { const [part, prop, t] = s.split('|'); return { part, prop, t: +t }; });
+      const every = [...S.App.sel.keys].map((s) => { const [part, prop, t] = s.split('|'); return { part, prop, t: +t }; });
+      const keys = every.filter((k) => !k.part.startsWith('state:'));   // part keys (face keys have no value or ease)
+      if (!keys.length && every.length === 1) return null;              // one face key: its own card says it all
       const find = (q, k) => S.Model.track(q, k.part, k.prop).find((x) => x.t === k.t);
       const p = S.App.project;
       const eases = new Set(keys.map((k) => (find(p, k) || {}).ease));
@@ -191,7 +193,7 @@
       const out = [];
       // the keys' value, when they are all the same kind (all rotations, all scales…)
       const kinds = new Set(keys.map((k) => (S.Model.PERCENT.has(k.prop) ? 'pct' : k.prop === 'rot' || k.prop === 'angle' ? 'rot' : 'move')));
-      if (kinds.size === 1) {
+      if (keys.length && kinds.size === 1) {
         const isScale = kinds.has('pct');
         const label = keys.length === 1 ? S.Model.PROP_LABEL[keys[0].prop] : 'Value (all)';
         const get = () => {
@@ -202,7 +204,7 @@
         if (keys.length > 1) input.placeholder = 'mixed';
         out.push(this.f(label, input, el('span', { class: 'val' }, isScale ? '%' : kinds.has('rot') ? '°' : '')));
       }
-      if (keys.length === 1) {
+      if (every.length === 1 && keys.length === 1) {
         const k = keys[0];
         out.unshift(this.f('Time', this.num(() => k.t, (v) => {
           S.App.edit((q) => { const to = Math.max(0, Math.min(q.duration, Math.round(v))); S.Model.moveKey(q, k.part, k.prop, k.t, to); S.App.sel.keys = new Set([`${k.part}|${k.prop}|${to}`]); });
@@ -214,7 +216,7 @@
           const dt = dir * (parseFloat(by.value) || 0);
           if (!dt) return;
           let moved = [];
-          S.App.edit((q) => { moved = S.Timeline.moveKeys(q, keys, dt); });
+          S.App.edit((q) => { moved = S.Timeline.moveKeys(q, every, dt); });
           S.App.sel.keys = new Set(moved.map((k) => `${k.part}|${k.prop}|${k.t}`));
           S.App.refresh();
         };
@@ -222,10 +224,11 @@
           el('button', { class: 'small', title: 'Earlier', onclick: () => shift(-1) }, '◂'),
           el('button', { class: 'small', title: 'Later', onclick: () => shift(1) }, '▸')), 'Move every selected key earlier or later (ms)'));
       }
-      out.push(this.f('Ease', ease, null, 'How the value moves from this key to the next one'));
-      const parts = new Set(keys.map((k) => k.part));
-      return this.card(`${keys.length} key${keys.length > 1 ? 's' : ''} selected`,
-        keys.length > 1 ? el('p', { class: 'note' }, `On ${parts.size} part${parts.size > 1 ? 's' : ''}. Shift+click keys, or Shift+drag a box in the timeline, to select more.`) : null,
+      if (keys.length) out.push(this.f('Ease', ease, null, 'How the value moves from this key to the next one'));
+      const parts = new Set(keys.map((k) => k.part)), face = every.length - keys.length;
+      const on = [parts.size ? `${parts.size} part${parts.size > 1 ? 's' : ''}` : '', face ? `${face} face key${face > 1 ? 's' : ''}` : ''].filter(Boolean).join(' and ');
+      return this.card(`${every.length} key${every.length > 1 ? 's' : ''} selected`,
+        every.length > 1 ? el('p', { class: 'note' }, `${on}. Drag any of them in the timeline to move them all. Drag a box over empty timeline to select keys; Shift adds more.`) : null,
         ...out,
         el('div', { class: 'row' }, el('button', { class: 'danger', onclick: () => S.App.deleteSelection() }, 'Delete (Del)')));
     },
@@ -312,6 +315,7 @@
             q.states[item.name] = q.states[item.name].filter((x) => x === key || x.t !== to);
             key.t = to; q.states[item.name].sort((a, b) => a.t - b.t);
             S.App.sel.item = { ...item, t: to };
+            S.App.sel.keys = new Set([`state:${item.name}|v|${to}`]);
           }), { step: 10 }), el('span', { class: 'val' }, 'ms')),
           this.f('Shows', this.select(this.stateOptions(item.name), () => (find(S.App.project) || {}).v || '', (v) => this.edit((q) => { const key = find(q); if (key) key.v = v; }))),
           el('p', { class: 'note' }, '"normal" hands the ' + item.name + ' back to EasyTuber (blinking, talking).'),

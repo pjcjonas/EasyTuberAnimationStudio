@@ -159,7 +159,11 @@
       const p = this.project;
       this.sel.parts = new Set([...this.sel.parts].filter((id) => PT.PART[id]));
       if (this.sel.part && !this.sel.parts.has(this.sel.part)) this.sel.part = [...this.sel.parts].pop() || null;
-      this.sel.keys = new Set([...this.sel.keys].filter((k) => { const [part, prop, t] = k.split('|'); return S.Model.track(p, part, prop).some((x) => x.t === +t); }));
+      this.sel.keys = new Set([...this.sel.keys].filter((k) => {
+        const [part, prop, t] = k.split('|');
+        if (part.startsWith('state:')) return (p.states[part.slice(6)] || []).some((x) => x.t === +t);
+        return S.Model.track(p, part, prop).some((x) => x.t === +t);
+      }));
       const it = this.sel.item;
       if (it && ((it.kind === 'effect' && !p.effects.some((x) => x.id === it.id)) || (it.kind === 'sound' && !p.sounds[it.i]) || (it.kind === 'front' && !p.inFront[it.i]) || (it.kind === 'state' && !p.states[it.name].some((x) => x.t === it.t)))) this.sel.item = null;
     },
@@ -168,8 +172,14 @@
       const { keys, item } = this.sel;
       if (keys.size) {
         const list = [...keys].map((s) => s.split('|'));
-        this.edit((q) => { for (const [part, prop, t] of list) S.Model.removeKey(q, part, prop, +t); });
+        this.edit((q) => {
+          for (const [part, prop, t] of list) {
+            if (part.startsWith('state:')) q.states[part.slice(6)] = q.states[part.slice(6)].filter((x) => x.t !== +t);
+            else S.Model.removeKey(q, part, prop, +t);
+          }
+        });
         this.sel.keys = new Set();
+        this.sel.item = null;
       } else if (item) {
         this.edit((q) => {
           if (item.kind === 'effect') q.effects = q.effects.filter((x) => x.id !== item.id);
@@ -252,7 +262,7 @@
     },
 
     copyKeys() {
-      const keys = [...this.sel.keys].map((s) => { const [part, prop, t] = s.split('|'); return { part, prop, t: +t }; });
+      const keys = [...this.sel.keys].map((s) => { const [part, prop, t] = s.split('|'); return { part, prop, t: +t }; }).filter((k) => !k.part.startsWith('state:'));
       if (!keys.length) return;
       const base = Math.min(...keys.map((k) => k.t));
       this.clip = keys.map((k) => { const x = S.Model.track(this.project, k.part, k.prop).find((y) => y.t === k.t); return { part: k.part, prop: k.prop, dt: k.t - base, v: x.v, ease: x.ease }; });
@@ -287,7 +297,9 @@
         v = ex[0].id;
       }
       this.edit((q) => S.Model.setStateKey(q, name, t, v));
-      this.select({ kind: 'state', name, t: Math.max(0, Math.min(this.project.duration, Math.round(t))) });
+      const at = Math.max(0, Math.min(this.project.duration, Math.round(t)));
+      this.sel = { part: null, parts: new Set(), keys: new Set([`state:${name}|v|${at}`]), item: { kind: 'state', name, t: at } };
+      this.refresh();
     },
 
     addInFront(t) {
@@ -464,7 +476,7 @@
       const keys = [
         ['F  J', 'free motion (anywhere, your own pivot) / EasyTuber joints'], ['R  M  S', 'rotate / move / scale tool (Shift: move, Alt: scale)'], ['drag pivot', 'move a part\'s pivot anywhere (Ctrl snaps)'], ['Space', 'play / pause'], [', .', 'previous / next key'], ['← →', 'move the playhead (Shift: 100 ms)'],
         ['Ctrl+click', 'select several parts (stage or timeline)'], ['drag on stage', 'box-select parts'], ['Ctrl+A', 'select every part'],
-        ['K', 'key the selected parts'], ['Shift+drag', 'box-select keys (timeline)'], ['Ctrl+C / V', 'copy / paste keys (onto the selected parts)'],
+        ['K', 'key the selected parts'], ['drag', 'on empty timeline: box-select keys (Shift adds)'], ['Ctrl+C / V', 'copy / paste keys (onto the selected parts)'],
         ['Del', 'delete'], ['Ctrl+Z / Y', 'undo / redo'], ['Ctrl+S, Ctrl+E', 'save, export'],
       ];
       box.replaceChildren(
