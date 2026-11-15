@@ -91,6 +91,8 @@
         { say: 'The length is two thousand milliseconds, which is two seconds. That\'s fine.', do: async (T) => { T.highlight('#fDuration', '', { pad: 4 }); await T.point('#fDuration'); await T.wait(900); T.unhighlight(); } },
         { say: 'First the pivots: I put the upper arm\'s pivot on the shoulder,', do: async (T) => { await T.clickPart('armRUpper'); await T.dragPivotToJoint('armRUpper'); } },
         { say: 'and the forearm\'s on the elbow.', do: async (T) => { await T.clickPart('armRLower'); await T.dragPivotToJoint('armRLower'); } },
+        { say: 'The forearm should hang from the upper arm, so I select the upper arm and tick children go with it, in the inspector.',
+          do: async (T) => { await T.clickPart('armRUpper'); await T.wait(200); const box = [...document.querySelectorAll('#inspector label.check')].find((l) => /children go with it/.test(l.textContent)); if (box) { T.highlight(box, '', { pad: 4 }); if (!box.querySelector('input').checked) await T.click(box); await T.wait(600); T.unhighlight(); } } },
         { say: 'Keys are always set at the playhead, the pink line. I\'ll drag it to five hundred milliseconds.', do: async (T) => { await T.scrubTo(500, 1200); } },
         { say: 'Now I turn the upper arm up. The forearm comes with it.', do: async (T) => { await T.rotatePartTo('armRUpper', -100, { ms: 1600 }); } },
         { say: 'See the diamonds in the timeline? The studio also added rest keys at the start and the end, so the arm rises from its normal position and comes back down by itself.',

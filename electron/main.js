@@ -217,16 +217,23 @@ function devRecord() {
   const dir = process.env.STUDIO_RECORD;
   fs.mkdirSync(dir, { recursive: true });
   const frames = [];
-  let t0 = null, last = 0, recording = false;
+  let t0 = null, last = 0, recording = false, lastImage = null;
   win.webContents.on('console-message', (e) => {
     if (e.message === '[t0]') { t0 = Date.now(); recording = true; return; }
+    // "[shot] name": save the last painted frame as shots/name.png (scripts/tutorial/screenshots.js)
+    if (e.message.startsWith('[shot] ') && lastImage) {
+      fs.mkdirSync(path.join(dir, 'shots'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'shots', e.message.slice(7).trim() + '.png'), lastImage.toPNG());
+      return;
+    }
     console.log(`[page ${e.level}] ${e.message}`);
   });
   win.webContents.setFrameRate(30);
   win.webContents.on('did-finish-load', () => win.webContents.setZoomFactor(Number(process.env.STUDIO_ZOOM || 1.25)));   // readable on a 1080p video
   win.webContents.on('paint', (e, dirtyRect, image) => {
     const t = Date.now();
-    if (!recording || t - last < 30) return;
+    lastImage = image;
+    if (!recording || t - last < 30 || process.env.STUDIO_NOFRAMES) return;
     last = t;
     const file = `f${String(frames.length).padStart(6, '0')}.jpg`;
     fs.writeFileSync(path.join(dir, file), image.toJPEG(90));
