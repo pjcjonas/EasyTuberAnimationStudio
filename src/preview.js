@@ -29,6 +29,15 @@
       this.renderer = new PT.Renderer(canvas);
       this.renderer.stageMode = true;
       this.renderer.view = () => this.view();   // zoom and pan; actions read the view from here too
+      /* Paused, the stage shows the pose at the playhead at full strength: the blend in / out would
+         fade it to nothing at the start and end of the timeline, where you are often posing.
+         Playing shows the action exactly as EasyTuber plays it, fades included. */
+      const ctx = PT.Actions.ctx;
+      PT.Actions.ctx = function (run, now, project) {
+        const c = ctx.call(this, run, now, project);
+        if (!Preview.playing && !(run.def.hold && run.releaseAt != null)) c.envelope = () => 1;
+        return c;
+      };
       this.usePlaceholder();
       PT.Actions.page = 'cam';
       PT.Actions.onError = (def, e) => { this.runError = e; if (this.onError) this.onError(e); };
@@ -147,9 +156,10 @@
     // zoom in on the avatar: its drawn parts fill most of the view
     fitAvatar() {
       const pose = this.lastPose, rig = this.rig;
+      // the last pose was drawn with the current view: measure it with that view, then reset
+      const inv = M.inv(this.view());
       this.fit();
       if (!pose) return;
-      const inv = M.inv(this.view());
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const def of PT.PARTS) {
         const part = rig.parts[def.id], e = PT.Assets.primary(def.id, rig.stage.placeholders);

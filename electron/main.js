@@ -158,15 +158,20 @@ function handlers() {
 }
 
 function createWindow() {
+  const rec = !!process.env.STUDIO_RECORD;   // development: record a video offscreen (scripts/tutorial)
   win = new BrowserWindow({
-    width: 1500, height: 920, minWidth: 1100, minHeight: 680,
-    backgroundColor: '#17151f', autoHideMenuBar: true,
+    width: rec ? 1920 : 1500, height: rec ? 1080 : 920, useContentSize: rec, minWidth: 1100, minHeight: 680,
+    show: !rec, backgroundColor: '#17151f', autoHideMenuBar: true,
     title: 'EasyTuber Animation Studio',
     icon: path.join(ROOT, 'build', 'icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: !process.env.STUDIO_SHOT },
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true,
+      backgroundThrottling: !process.env.STUDIO_SHOT && !rec, offscreen: rec,
+    },
   });
   win.loadURL('app://studio/index.html');
   if (process.env.STUDIO_SHOT) devShot();
+  if (rec) devRecord();
   win.on('close', (e) => {
     if (!dirty) return;
     const choice = dialog.showMessageBoxSync(win, {
@@ -197,6 +202,41 @@ function devShot() {
     for (let i = 0; i < 5; i++) {
       try { fs.writeFileSync(process.env.STUDIO_SHOT, (await win.webContents.capturePage()).toPNG()); break; } catch (err) { console.log('[capture retry]', err.message); await wait(500); }
     }
+    dirty = false;
+    app.quit();
+  });
+}
+
+/* Development: STUDIO_RECORD=<folder> renders the window offscreen at 1920x1080, saves 30 frames a
+   second there as JPEGs while STUDIO_EVAL (page script, returning a promise) runs, then writes
+   meta.json: each frame's time, when the page said "[t0]" (its clock's zero), and what the script
+   returned. scripts/tutorial/build.js turns that into a video. */
+function devRecord() {
+  const dir = process.env.STUDIO_RECORD;
+  fs.mkdirSync(dir, { recursive: true });
+  const frames = [];
+  let t0 = null, last = 0, recording = false;
+  win.webContents.on('console-message', (e) => {
+    if (e.message === '[t0]') { t0 = Date.now(); recording = true; return; }
+    console.log(`[page ${e.level}] ${e.message}`);
+  });
+  win.webContents.setFrameRate(30);
+  win.webContents.on('did-finish-load', () => win.webContents.setZoomFactor(Number(process.env.STUDIO_ZOOM || 1.25)));   // readable on a 1080p video
+  win.webContents.on('paint', (e, dirtyRect, image) => {
+    const t = Date.now();
+    if (!recording || t - last < 30) return;
+    last = t;
+    const file = `f${String(frames.length).padStart(6, '0')}.jpg`;
+    fs.writeFileSync(path.join(dir, file), image.toJPEG(90));
+    frames.push({ file, t });
+  });
+  win.webContents.once('did-finish-load', async () => {
+    await new Promise((r) => setTimeout(r, 1500));
+    let result = null;
+    try { result = await win.webContents.executeJavaScript(fs.readFileSync(process.env.STUDIO_EVAL, 'utf8')); } catch (err) { console.log('[eval error]', err.message); }
+    recording = false;
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ t0, frames, result }));
+    console.log(`[record] ${frames.length} frames`);
     dirty = false;
     app.quit();
   });

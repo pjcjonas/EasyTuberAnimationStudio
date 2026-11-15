@@ -211,8 +211,12 @@
     /* the preview shows a key's value times this (the blend in / out and the strength) */
     factorAt(ms) {
       const p = this.project, c = (u) => Math.max(0, Math.min(1, u));
-      let env = p.blend.in > 0 ? c(ms / p.blend.in) : 1;
-      if (!p.hold) env = Math.min(env, p.blend.out > 0 ? c((p.duration - ms) / p.blend.out) : 1);
+      // paused (posing), the stage leaves the blend out (see preview.js); playing, it's in
+      let env = 1;
+      if (S.Preview.playing) {
+        env = p.blend.in > 0 ? c(ms / p.blend.in) : 1;
+        if (!p.hold) env = Math.min(env, p.blend.out > 0 ? c((p.duration - ms) / p.blend.out) : 1);
+      }
       const s = p.strength.on ? (S.Preview.settings.strength ?? p.strength.default) / 100 : 1;
       return env * s;
     },
@@ -457,7 +461,7 @@
       try { runtime = (await (await fetch('runtime/easytuber/VERSION')).text()).trim(); } catch (e) { /* unknown */ }
       const a = (href, text) => el('a', { href, target: '_blank', rel: 'noopener' }, text);
       const keys = [
-        ['Space', 'play / pause'], [', .', 'previous / next key'], ['← →', 'move the playhead (Shift: 100 ms)'],
+        ['R  M  S', 'rotate / move / scale tool (Shift: move, Alt: scale)'], ['Space', 'play / pause'], [', .', 'previous / next key'], ['← →', 'move the playhead (Shift: 100 ms)'],
         ['Ctrl+click', 'select several parts (stage or timeline)'], ['drag on stage', 'box-select parts'], ['Ctrl+A', 'select every part'],
         ['K', 'key the selected parts'], ['Shift+drag', 'box-select keys (timeline)'], ['Ctrl+C / V', 'copy / paste keys (onto the selected parts)'],
         ['Del', 'delete'], ['Ctrl+Z / Y', 'undo / redo'], ['Ctrl+S, Ctrl+E', 'save, export'],
@@ -583,6 +587,9 @@
           break;
         default:
           if (k === 'k') this.keyParts(this.selectedParts());
+          else if (k === 'r') S.Tools.setTool('rotate');
+          else if (k === 'm') S.Tools.setTool('move');
+          else if (k === 's') S.Tools.setTool('scale');
       }
     },
   };

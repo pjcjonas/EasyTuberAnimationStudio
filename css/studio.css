@@ -177,3 +177,12 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 .about td { padding: 2px 0; vertical-align: top; }
 .about td:first-child { color: var(--text); white-space: nowrap; padding-right: 10px; font: 11px Consolas, monospace; }
 .about td:last-child { color: var(--dim); }
+#stageTools { position: absolute; top: 10px; left: 10px; display: flex; gap: 4px; align-items: center; background: rgba(23,21,31,.85); border: 1px solid var(--line); border-radius: 8px; padding: 4px; z-index: 3; }
+#stageTools button { border-color: transparent; background: none; }
+#stageTools button.on { background: var(--accent); color: #fff; }
+#stageTools button kbd { margin-left: 4px; color: inherit; opacity: .6; }
+#stageTools label { margin: 0 6px 0 8px; color: var(--dim); }
+#stage.over { cursor: pointer; }
+#stage[data-tool=rotate].over { cursor: grab; }
+#stage[data-tool=move].over { cursor: move; }
+#stage[data-tool=scale].over { cursor: ns-resize; }

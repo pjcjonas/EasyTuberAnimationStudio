@@ -15,7 +15,8 @@
     "icon": "python build/make-icon.py",
     "dist": "npm run dist:win",
     "dist:win": "electron-packager . EasyTuberStudio --platform=win32 --arch=x64 --out=dist --overwrite --icon=build/icon.ico --prune=true --ignore=\"^/(dist|tests|scripts|build/make-icon\\.py|build/icon\\.icns|\\.claude|\\.github|\\.gitignore|\\.gitattributes|README\\.md|CHANGELOG\\.md|RELEASING\\.md)\" --app-copyright=\"EasyTuber Animation Studio\" --win32metadata.ProductName=\"EasyTuber Animation Studio\" --win32metadata.FileDescription=\"EasyTuber Animation Studio\"",
-    "dist:mac": "electron-packager . EasyTuberStudio --platform=darwin --arch=x64,arm64 --out=dist --overwrite --icon=build/icon.icns --prune=true --ignore=\"^/(dist|tests|scripts|build/make-icon\\.py|build/icon\\.ico|\\.claude|\\.github|\\.gitignore|\\.gitattributes|README\\.md|CHANGELOG\\.md|RELEASING\\.md)\" --app-copyright=\"EasyTuber Animation Studio\" --app-bundle-id=com.pjcjonas.easytuberstudio --app-category-type=public.app-category.graphics-design"
+    "dist:mac": "electron-packager . EasyTuberStudio --platform=darwin --arch=x64,arm64 --out=dist --overwrite --icon=build/icon.icns --prune=true --ignore=\"^/(dist|tests|scripts|build/make-icon\\.py|build/icon\\.ico|\\.claude|\\.github|\\.gitignore|\\.gitattributes|README\\.md|CHANGELOG\\.md|RELEASING\\.md)\" --app-copyright=\"EasyTuber Animation Studio\" --app-bundle-id=com.pjcjonas.easytuberstudio --app-category-type=public.app-category.graphics-design",
+    "tutorial": "node scripts/tutorial/build.js"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",

@@ -19,14 +19,22 @@ npm start
 npm test        # the exported code, run in EasyTuber's action engine
 ```
 
+## Pivots: where parts turn
+
+Every part turns around one point, its **pivot**: the joint EasyTuber gave it (EasyTuber's Part tab). The torso turns at the hips (the bottom center of the body), the neck at its base, the face at the chin, an upper arm at the shoulder, a forearm at the elbow. Parts hang from each other: arms and neck from the torso, the face from the neck, eyes, mouth and hair from the face. A child always follows its parent, so turning the torso leans the whole upper body from the hips.
+
+Select a part and its pivot shows as a pink crosshair. If a part swings around an odd point, that's its pivot. The pivot stays where it is and the part turns around it.
+
 ## Making an action
 
 1. Set the **Id** (the file name, letters/digits/`-`/`_`), the **Name** and the **Length** at the top. Tick **Held** for an action that stays on until it is turned off.
-2. Move the playhead (click or drag the ruler) and pose parts on the stage:
-   - **drag** a part to rotate it around its joint (Ctrl snaps to 15°)
-   - **Shift+drag** to move it, **Alt+drag** to scale it
+2. Move the playhead (click or drag the ruler) and pose parts on the stage with the tool picked at the top left of the stage:
+   - **Rotate** (`R`): drag a part to turn it around its pivot (Ctrl snaps to 15°). This is the tool you'll use most.
+   - **Move** (`M`, or hold Shift): shift a part. Moving an arm pulls it off its shoulder, so turn arms instead.
+   - **Scale** (`S`, or hold Alt): drag up to grow, down to shrink.
+   - paused, the stage shows the pose at the playhead at full strength. The blend in/out fades only show while playing, exactly as in EasyTuber.
    - every drag sets a key at the playhead. The first key on a track also adds rest keys at the start and end, so the part moves out of rest and back (turn this off under **Action > Rest keys**).
-   - **several parts at once:** Ctrl+click parts (on the stage or their names in the timeline), drag a box on empty stage, or press Ctrl+A. A drag then turns, moves or scales them all by the same amount, each around its own joint. A value typed in the Inspector goes on all of them, **K** keys them all, and pasting one part's keys puts them on every selected part.
+   - **several parts at once:** Ctrl+click parts (on the stage or their names in the timeline), drag a box on empty stage, or press Ctrl+A. A drag then turns, moves or scales them all by the same amount, each around its own pivot. A part whose parent is selected too just follows its parent, so nothing turns twice. A value typed in the Inspector goes on all of them, **K** keys them all, and pasting one part's keys puts them on every selected part.
 3. Refine in the **timeline**: drag keys to retime them, right-click for easing, double-click a row to add a key, **Delete** to remove. Click **▸** on a part to see its Rotate / Move / Scale rows. Shift+click keys, or Shift+drag a box over empty timeline, to select many keys: drag them together, set their easing or value at once, or move them by a number of ms.
 4. **Face**: eyes, mouth and expression keys (expressions come from your avatar). A key set to **normal** hands the face back to EasyTuber's blinking and talking.
 5. **Add** effects (sparkles, music notes, motion marks, emoji burst, caption, your own picture), sounds, and **parts in front** (an arm reaching across the face). Effects sit on a point of a part: pick it on the stage with **⌖ Pick**.
@@ -34,7 +42,11 @@ npm test        # the exported code, run in EasyTuber's action engine
 
 Pick **My EasyTuber avatar** (top right) to preview on your own avatar, including your own parts. It is read from `%APPDATA%\EASY-TUBER` (macOS: `~/Library/Application Support/EASY-TUBER`), read only.
 
-Keys (also under **?** in the app): `Space` play/pause · `,` `.` previous/next key · `←` `→` nudge the playhead (Shift ×10) · `Ctrl+click` / box: select several parts · `Ctrl+A` every part · `K` key the selected parts · `Shift+drag` (timeline) box-select keys · `Del` delete · `Ctrl+C`/`Ctrl+V` copy/paste keys · `Ctrl+Z`/`Ctrl+Y` · `Ctrl+S` save · `Ctrl+E` export.
+Keys (also under **?** in the app): `R` `M` `S` rotate/move/scale tool · `Space` play/pause · `,` `.` previous/next key · `←` `→` nudge the playhead (Shift ×10) · `Ctrl+click` / box: select several parts · `Ctrl+A` every part · `K` key the selected parts · `Shift+drag` (timeline) box-select keys · `Del` delete · `Ctrl+C`/`Ctrl+V` copy/paste keys · `Ctrl+Z`/`Ctrl+Y` · `Ctrl+S` save · `Ctrl+E` export.
+
+## Tutorial video
+
+`npm run tutorial` records a narrated walkthrough of the real app (Windows): it speaks each line with a Windows voice, drives the studio with a visible cursor and captions, and writes `tutorial/EasyTuberStudio-tutorial.mp4` and an `.srt`. It uses the US English voice Mark, or else David (install **English (United States)** under **Settings > Time & language > Speech**); pick another with `--voice`, or record some chapters with `--chapters 3-5`. Needs ffmpeg. The narration and the on-screen steps are in `scripts/tutorial/script.js`.
 
 ## Getting it into EasyTuber
 
