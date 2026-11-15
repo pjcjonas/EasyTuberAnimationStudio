@@ -27,7 +27,7 @@
         const v = b.get();
         if (b.input.type === 'checkbox') b.input.checked = !!v;
         else if (b.input.classList.contains('keybtn')) b.input.className = 'keybtn ' + v;
-        else if (b.input.tagName === 'SPAN') b.input.textContent = v;
+        else if (b.input.tagName === 'SPAN' || b.input.tagName === 'DIV') b.input.textContent = v;
         else if (String(b.input.value) !== String(v)) b.input.value = v;
       }
     },
@@ -95,48 +95,90 @@
       this.root.scrollTop = top;
     },
 
-    /* One part, or several: a value typed here goes on every selected part, keyed at the playhead. */
+    /* One part, or several: a value typed here goes on every selected part, keyed at the playhead.
+       Free motion first (anywhere on the stage, around your pivot), then EasyTuber's joint motion. */
+    propRow(ids, prop, t) {
+      const pct = S.Model.PERCENT.has(prop), many = ids.length > 1;
+      const get = () => {
+        const vals = ids.map((id) => r1(S.Model.valueAt(S.App.project, id, prop, t()) * (pct ? 100 : 1)));
+        return vals.every((v) => v === vals[0]) ? vals[0] : '';
+      };
+      const input = this.num(get, (v) => {
+        let val = pct ? v / 100 : v;
+        if (prop === 'opacity') val = Math.max(0, Math.min(1, val));
+        if (prop === 'size') val = Math.max(0, val);
+        S.App.setOnParts(ids, prop, t(), val, { source: 'inspector' });
+      }, { step: 1 });
+      if (many) input.placeholder = 'mixed';
+      const keyState = () => {
+        const keyed = ids.filter((id) => S.Model.track(S.App.project, id, prop).some((k) => k.t === t()));
+        if (keyed.length === ids.length) return 'on';
+        return keyed.length || ids.some((id) => S.Model.track(S.App.project, id, prop).length) ? 'has' : '';
+      };
+      const kb = el('button', { class: 'keybtn ' + keyState(), title: many ? 'Key every selected part at the playhead (click again to remove the keys)' : 'Key at the playhead (click again to remove it)' }, '◆');
+      kb.addEventListener('click', () => {
+        const on = keyState() === 'on';
+        this.edit((q) => {
+          for (const id of ids) {
+            if (on) S.Model.removeKey(q, id, prop, t());
+            else if (!S.Model.track(q, id, prop).some((k) => k.t === t())) S.App.keyValue(q, id, prop, t(), S.Model.valueAt(q, id, prop, t()));
+          }
+        });
+      });
+      this.bind(kb, keyState);
+      return this.f(S.Model.PROP_LABEL[prop].replace(/^Joint (\w)/, (m, c) => c.toUpperCase()), el('span', { style: { display: 'flex', gap: '6px', alignItems: 'center' } }, input, el('span', { class: 'val' }, S.Model.UNIT[prop])), kb);
+    },
+
     partCard(ids) {
       const t = () => Math.round(S.App.playhead());
       const many = ids.length > 1;
-      const unit = { rot: '°', ox: 'rig units', oy: 'rig units', sx: '%', sy: '%' };
-      const rows = S.Model.PROPS.map((prop) => {
-        const isScale = prop === 'sx' || prop === 'sy';
-        // the value at the playhead, or '' when the parts differ
-        const get = () => {
-          const vals = ids.map((id) => r1(S.Model.valueAt(S.App.project, id, prop, t()) * (isScale ? 100 : 1)));
-          return vals.every((v) => v === vals[0]) ? vals[0] : '';
-        };
-        const input = this.num(get, (v) => S.App.setOnParts(ids, prop, t(), isScale ? v / 100 : v, { source: 'inspector' }), { step: 1 });
-        if (many) input.placeholder = 'mixed';
-        const keyState = () => {
-          const keyed = ids.filter((id) => S.Model.track(S.App.project, id, prop).some((k) => k.t === t()));
-          if (keyed.length === ids.length) return 'on';
-          return keyed.length || ids.some((id) => S.Model.track(S.App.project, id, prop).length) ? 'has' : '';
-        };
-        const kb = el('button', { class: 'keybtn ' + keyState(), title: many ? 'Key every selected part at the playhead (click again to remove the keys)' : 'Key at the playhead (click again to remove it)' }, '◆');
-        kb.addEventListener('click', () => {
-          const on = keyState() === 'on';
-          this.edit((q) => {
-            for (const id of ids) {
-              if (on) S.Model.removeKey(q, id, prop, t());
-              else if (!S.Model.track(q, id, prop).some((k) => k.t === t())) S.App.keyValue(q, id, prop, t(), S.Model.valueAt(q, id, prop, t()));
-            }
-          });
-        });
-        this.bind(kb, keyState);
-        return this.f(S.Model.PROP_LABEL[prop], el('span', { style: { display: 'flex', gap: '6px', alignItems: 'center' } }, input, el('span', { class: 'val' }, unit[prop])), kb);
-      });
       const id = ids[0], def = PT.PART[id], mirror = !many && PT.MIRROR[id];
       const title = many ? `${ids.length} parts` : def ? PT.partName(def) : id;
+      const free = S.Tools.space === 'free';
+
+      // where the pivot of the (first) part is on the 1920x1080 stage right now
+      const where = el('div', { class: 'stagepos' });
+      const whereText = () => {
+        const j = S.Preview.lastPose && S.Tools.joint(id);
+        if (!j) return '';
+        const [x, y] = S.Tools.toStage(j);
+        return `pivot on the stage: x ${Math.round(x)}, y ${Math.round(y)} (of 1920 × 1080)`;
+      };
+      where.textContent = whereText();
+      this.bind(where, whereText);
+
+      const r3 = (n) => Math.round(n * 1000) / 1000;
+      const pv = () => S.Tools.freePivot(id);   // the joint, worked out, when it's on the joint
+      const pivotRow = !many ? this.f('Pivot', el('span', { style: { display: 'flex', gap: '6px' } },
+        this.num(() => r3(pv().u), (v) => this.edit((q) => { q.pivots[id] = { u: v, v: r3(pv().v) }; }), { step: 0.05 }),
+        this.num(() => r3(pv().v), (v) => this.edit((q) => { q.pivots[id] = { u: r3(pv().u), v }; }), { step: 0.05 })),
+        this.bind(el('span', { class: 'val' }, S.App.project.pivots[id] && S.App.project.pivots[id].joint ? 'joint' : ''), () => (S.App.project.pivots[id] && S.App.project.pivots[id].joint ? 'joint' : '')),
+        'Across and down the part\'s drawing: 0 to 1 is inside it, other numbers are outside. Or drag the pink crosshair on the stage (Ctrl snaps).') : null;
+      const setPivot = (value) => S.App.edit((q) => { for (const x of ids) { if (value) q.pivots[x] = { ...value }; else delete q.pivots[x]; } });
+      const followBox = this.check(() => ids.every((x) => S.App.project.follow[x] === true),
+        (v) => S.App.edit((q) => { for (const x of ids) { if (v) q.follow[x] = true; else delete q.follow[x]; } }), 'children go with it');
+
+      const freeRows = S.Model.FREE_PROPS.map((prop) => this.propRow(ids, prop, t));
+      const jointRows = S.Model.JOINT_PROPS.map((prop) => this.propRow(ids, prop, t));
+      const hasJoint = ids.some((x) => S.Model.JOINT_PROPS.some((prop) => S.Model.track(S.App.project, x, prop).length));
+
       return this.card([title, el('span', { class: 'grow' }), el('span', { class: 'val' }, '@ playhead')],
-        many ? el('p', { class: 'note' }, ids.map((x) => (PT.PART[x] ? PT.partName(PT.PART[x]) : x)).join(', ') + '. A value typed here goes on all of them; dragging on the stage turns, moves or scales them all by the same amount.') : null,
-        ...rows,
+        many ? el('p', { class: 'note' }, ids.map((x) => (PT.PART[x] ? PT.partName(PT.PART[x]) : x)).join(', ') + '. A value typed here goes on all of them; a drag on the stage changes them all by the same amount.') : null,
+        el('h5', {}, 'Free: anywhere on the stage', el('span', { class: 'grow' }), free ? el('span', { class: 'val' }, 'drag mode') : null),
+        where,
+        ...freeRows,
+        pivotRow,
         el('div', { class: 'row' },
-          el('button', { onclick: () => S.App.keyParts(ids), title: 'K' }, many ? '◆ Key all parts' : '◆ Key all'),
+          el('button', { class: 'small', onclick: () => setPivot(null), title: 'Put the pivot in the middle of the drawing' }, 'Pivot: middle'),
+          el('button', { class: 'small', onclick: () => setPivot({ joint: true }), title: 'Put the pivot on the joint the avatar gives this part (it then fits any avatar)' }, 'Pivot: joint'),
+          el('label', { class: 'check', title: 'Off: this part moves on its own (the default). On: the parts hanging from it go with it.' }, followBox)),
+        el('h5', {}, 'Joint: EasyTuber\'s rig', el('span', { class: 'grow' }), !free ? el('span', { class: 'val' }, 'drag mode') : null),
+        ...(hasJoint || !free ? jointRows : [el('p', { class: 'note' }, 'Turns around the joint EasyTuber gives the part. Switch the stage to Joint (J) to pose this way.')]),
+        el('div', { class: 'row' },
+          el('button', { onclick: () => S.App.keyParts(ids), title: 'K' }, many ? '◆ Key all parts' : '◆ Key'),
           mirror ? el('button', { onclick: () => S.App.edit((q) => S.Model.mirror(q, { [id]: mirror }, id.startsWith('armL'))), title: `Copy this part's keys to ${PT.partName(PT.PART[mirror])}, mirrored` }, '⇄ Mirror to other arm') : null,
           mirror ? el('button', { onclick: () => S.App.edit((q) => S.Model.mirror(q, PT.MIRROR, id.startsWith('armL'))), title: 'Copy both parts of this arm to the other arm, mirrored' }, '⇄ Whole arm') : null,
-          el('button', { class: 'danger', onclick: () => S.App.edit((q) => { for (const x of ids) delete q.tracks[x]; }) }, 'Clear keys')));
+          el('button', { class: 'danger', onclick: () => S.App.edit((q) => { for (const x of ids) { delete q.tracks[x]; delete q.pivots[x]; delete q.follow[x]; } }) }, 'Clear')));
     },
 
     keysCard() {
@@ -148,9 +190,9 @@
         (v) => { if (v) S.App.edit((q) => { for (const k of keys) { const x = find(q, k); if (x) x.ease = v; } }); });
       const out = [];
       // the keys' value, when they are all the same kind (all rotations, all scales…)
-      const kinds = new Set(keys.map((k) => (k.prop === 'sx' || k.prop === 'sy' ? 'scale' : k.prop === 'rot' ? 'rot' : 'move')));
+      const kinds = new Set(keys.map((k) => (S.Model.PERCENT.has(k.prop) ? 'pct' : k.prop === 'rot' || k.prop === 'angle' ? 'rot' : 'move')));
       if (kinds.size === 1) {
-        const isScale = kinds.has('scale');
+        const isScale = kinds.has('pct');
         const label = keys.length === 1 ? S.Model.PROP_LABEL[keys[0].prop] : 'Value (all)';
         const get = () => {
           const vals = keys.map((k) => { const x = find(S.App.project, k); return x ? r1(x.v * (isScale ? 100 : 1)) : 0; });

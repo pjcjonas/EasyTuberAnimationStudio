@@ -7,23 +7,20 @@
 
   // the corners of some parts' drawings, on screen
   function bounds(ids) {
-    const M = PT().M, Tools = S().Tools, pose = S().Preview.lastPose;
+    const Tools = S().Tools;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const id of ids) {
-      const b = Tools.artBox(id);
-      if (!b || !pose[id]) continue;
-      for (const [u, v] of [[b.x, b.y], [b.x + b.w, b.y], [b.x, b.y + b.h], [b.x + b.w, b.y + b.h]]) {
-        const [x, y] = window.T.toClient(M.apply(pose[id].world, u, v));
+      for (const [u, v] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+        const q = Tools.artPoint(id, u, v);
+        if (!q) continue;
+        const [x, y] = window.T.toClient(q);
         x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
       }
     }
     return { x0, y0, x1, y1 };
   }
   // a point on a part's drawing (u, v = 0..1 across and down it), in canvas pixels
-  function partPoint(id, u, v) {
-    const b = S().Tools.artBox(id), w = S().Preview.lastPose[id].world;
-    return PT().M.apply(w, b.x + u * b.w, b.y + v * b.h);
-  }
+  function partPoint(id, u, v) { return S().Tools.artPoint(id, u, v); }
   const play = async (T, ms) => { await T.click('#btnPlay'); await T.wait(ms); if (S().Preview.playing) await T.click('#btnPlay'); };
 
   const TUTORIAL = [
@@ -43,7 +40,7 @@
       steps: [
         { say: 'Let\'s take a quick tour of the screen.' },
         { say: 'In the middle is the stage, with the avatar you are animating.', do: async (T) => { T.highlight('#stageWrap', 'Stage', { pad: -4 }); } },
-        { say: 'At its top left are the three posing tools: rotate, move, and scale.', do: async (T) => { T.unhighlight(); T.highlight('#stageTools', 'Posing tools', { below: true }); } },
+        { say: 'At its top left are the posing tools: free or joint motion, then rotate, move, and scale.', do: async (T) => { T.unhighlight(); T.highlight('#stageTools', 'Posing tools', { below: true }); } },
         { say: 'Along the top are the action\'s I D, which becomes its file name, its name in EasyTuber, and its length in milliseconds.', do: async (T) => { T.unhighlight(); T.highlight('.group.fields', 'The action', { below: true }); } },
         { say: 'Below the stage are the play controls,', do: async (T) => { T.unhighlight(); T.highlight('#transport', 'Play controls'); } },
         { say: 'and under them is the timeline. Every row is one body part, and the yellow diamonds you will add are keyframes.', do: async (T) => { T.unhighlight(); T.highlight('#timeline', 'Timeline', { pad: -4 }); } },
@@ -51,36 +48,38 @@
       ],
     },
     {
-      title: 'Pivots: where parts turn',
+      title: 'Free motion and pivots',
       steps: [
-        { say: 'Now the most important idea in the studio: pivots.', do: async (T) => { T.unhighlight(); } },
-        { say: 'Every body part turns around one point, called its pivot. Think of it as the part\'s joint.' },
-        { say: 'Point at a part to see its name.', do: async (T) => { await T.hoverPart('torso'); await T.wait(600); await T.hoverPart('armRLower'); } },
-        { say: 'When I click the torso, the pink crosshair shows its pivot. For the torso, the pivot is at the hips, at the bottom center of the body.',
-          do: async (T) => { await T.clickPart('torso'); await T.wait(300); T.highlightPoint(S().Tools.joint('torso'), 'Pivot'); } },
-        { say: 'That is why it can look like everything is anchored to the bottom center. Rotate the torso, and the whole upper body leans from the hips, like a real person.',
-          do: async (T) => { T.unhighlight(); await T.rotatePart('torso', 14, { ms: 1600 }); } },
-        { say: 'The head and the arms are attached to the torso, so they follow it. A child part always follows its parent.' },
-        { say: 'I\'ll undo that with Control Z.', do: async (T) => { await T.key('z', { ctrlKey: true }); } },
-        { say: 'The upper arm\'s pivot is at the shoulder,', do: async (T) => { await T.clickPart('armRUpper'); T.highlightPoint(S().Tools.joint('armRUpper'), 'Shoulder'); } },
-        { say: 'the forearm turns at the elbow,', do: async (T) => { T.unhighlight(); await T.clickPart('armRLower'); T.highlightPoint(S().Tools.joint('armRLower'), 'Elbow'); } },
-        { say: 'and the face tilts at the chin. These pivots come from your avatar\'s setup, in EasyTuber\'s Part tab.', do: async (T) => { T.unhighlight(); await T.clickStage(T.toClient(partPoint('face', 0.2, 0.62))); T.highlightPoint(S().Tools.joint('face'), 'Chin'); } },
-        { say: 'So if a part seems to swing around a strange point, look at its pivot. The pivot stays put, and everything turns around it.', do: async (T) => { await T.wait(1500); T.unhighlight(); } },
+        { say: 'Now the most important idea: free motion. Every part is like a layer on the nineteen twenty by ten eighty stage. You can move it anywhere, turn it, size it, and fade it.', do: async (T) => { T.unhighlight(); T.highlight(T.button('Free', '#stageTools'), 'Free mode', { below: true }); await T.wait(2500); T.unhighlight(); } },
+        { say: 'Point at a part to see its name.', do: async (T) => { await T.hoverPart('torso'); await T.wait(600); await T.hoverPart('armRUpper'); } },
+        { say: 'Click a part to select it. The pink crosshair is its pivot: the point it turns and sizes around. In free mode, it starts in the middle of the part.',
+          do: async (T) => { await T.clickPart('armRUpper'); await T.wait(300); T.highlightPoint(S().Tools.joint('armRUpper'), 'Pivot'); } },
+        { say: 'If I turn the arm now, it spins around its middle.', do: async (T) => { T.unhighlight(); await T.rotatePart('armRUpper', -40, { ms: 1300 }); await T.wait(300); await T.key('z', { ctrlKey: true }); } },
+        { say: 'So drag the crosshair to put the pivot wherever you want, even outside the part. Hold Control to snap it to the shoulder joint, the middle, an edge, or a corner.',
+          do: async (T) => { await T.dragPivotToJoint('armRUpper'); await T.wait(300); T.highlightPoint(S().Tools.joint('armRUpper'), 'Pivot on the shoulder'); } },
+        { say: 'Now the arm turns at the shoulder, like a real arm.', do: async (T) => { T.unhighlight(); await T.rotatePart('armRUpper', -60, { ms: 1400 }); } },
+        { say: 'Every part moves on its own. If I move the torso, the head and the arms stay exactly where they are.',
+          do: async (T) => { await T.click(T.button('✥ Move', '#stageTools')); const c = T.toClient(partPoint('torso', 0.5, 0.75)); await T.stageDrag(c, [c[0] - 160, c[1] - 30], { ms: 1400 }); } },
+        { say: 'If you do want the parts hanging from it to come along, tick children go with it, in the inspector.',
+          do: async (T) => { const box = [...document.querySelectorAll('#inspector label.check')].find((l) => /children go with it/.test(l.textContent)); if (box) { box.scrollIntoViewIfNeeded(); T.highlight(box, 'Children follow'); await T.point(box); } await T.wait(1800); T.unhighlight(); } },
+        { say: 'I\'ll undo these test moves with Control Z.', do: async (T) => { for (let i = 0; i < 3; i++) await T.key('z', { ctrlKey: true }); await T.click(T.button('↻ Rotate', '#stageTools')); } },
+        { say: 'The Joint switch turns parts around the joints set up in EasyTuber instead, the old way. Free mode can do all of that and more, so this video sticks to free mode.',
+          do: async (T) => { T.highlight(T.button('Joint', '#stageTools'), 'Joint mode', { below: true }); await T.wait(2500); T.unhighlight(); } },
       ],
     },
     {
-      title: 'The three tools',
+      title: 'Move, turn, size, and fade',
       steps: [
-        { say: 'Rotate is the tool you will use most. Drag a part, and it turns around its pivot. The yellow label shows how many degrees.',
-          do: async (T) => { await T.click(T.button('↻ Rotate', '#stageTools')); await T.rotatePart('armLUpper', 35, { ms: 1400 }); } },
-        { say: 'Move shifts a part without turning it. Holding Shift while you drag also moves, whatever tool is picked.',
-          do: async (T) => { await T.click(T.button('✥ Move', '#stageTools')); const f = T.toClient(partPoint('face', 0.2, 0.62)); await T.stageDrag(f, [f[0], f[1] - 30], { ms: 1000 }); } },
-        { say: 'Careful, though. Moving an arm pulls it away from its shoulder, which usually looks broken. For arms, rotate instead.',
-          do: async (T) => { await T.dragPart('armRLower', 60, 10, { ms: 1100 }); } },
-        { say: 'Scale grows or shrinks a part: drag up to grow, and down to shrink. Holding Alt does the same with any tool.',
-          do: async (T) => { await T.click(T.button('⤢ Scale', '#stageTools')); const f = T.toClient(partPoint('face', 0.2, 0.62)); await T.stageDrag(f, [f[0], f[1] - 45], { ms: 1100 }); } },
-        { say: 'I\'ll undo those test moves, and go back to rotate. The R, M, and S keys switch tools too.',
-          do: async (T) => { for (let i = 0; i < 4; i++) await T.key('z', { ctrlKey: true }); await T.key('r'); await T.key('Escape'); } },
+        { say: 'Move puts a part anywhere on the stage. The yellow label shows where its pivot is, in stage pixels.',
+          do: async (T) => { await T.click(T.button('✥ Move', '#stageTools')); const f = T.toClient(partPoint('face', 0.2, 0.62)); await T.stageDrag(f, [f[0] + 260, f[1] - 40], { ms: 1500 }); } },
+        { say: 'Rotate turns it around its pivot. Hold Control to snap to fifteen degree steps.',
+          do: async (T) => { await T.click(T.button('↻ Rotate', '#stageTools')); await T.rotatePart('face', 25, { ms: 1200, grab: () => partPoint('face', 0.85, 0.35) }); } },
+        { say: 'Scale grows or shrinks it around the pivot: drag up to grow, and down to shrink.',
+          do: async (T) => { await T.click(T.button('⤢ Scale', '#stageTools')); const f = T.toClient(partPoint('face', 0.2, 0.62)); await T.stageDrag(f, [f[0], f[1] - 50], { ms: 1100 }); } },
+        { say: 'Opacity, in the inspector, fades a part out. Zero hides it completely.',
+          do: async (T) => { const input = T.field(T.card('Face'), 'Opacity'); T.highlight(input, '', { pad: 4 }); await T.type(input, '40'); T.unhighlight(); } },
+        { say: 'Holding Shift always moves, and holding Alt always scales, whatever tool is picked. The R, M, and S keys switch tools.' },
+        { say: 'Let me undo all of that.', do: async (T) => { for (let i = 0; i < 4; i++) await T.key('z', { ctrlKey: true }); await T.click(T.button('↻ Rotate', '#stageTools')); await T.key('Escape'); } },
       ],
     },
     {
@@ -90,8 +89,10 @@
         { say: 'First, give it an I D, using letters, numbers, and dashes. I\'ll call it hello wave.', do: async (T) => { await T.type('#fId', 'hello-wave'); } },
         { say: 'Then a friendly name. That\'s the name you will see in EasyTuber\'s Actions tab.', do: async (T) => { await T.type('#fLabel', 'Hello wave'); } },
         { say: 'The length is two thousand milliseconds, which is two seconds. That\'s fine.', do: async (T) => { T.highlight('#fDuration', '', { pad: 4 }); await T.point('#fDuration'); await T.wait(900); T.unhighlight(); } },
+        { say: 'First the pivots: I put the upper arm\'s pivot on the shoulder,', do: async (T) => { await T.clickPart('armRUpper'); await T.dragPivotToJoint('armRUpper'); } },
+        { say: 'and the forearm\'s on the elbow.', do: async (T) => { await T.clickPart('armRLower'); await T.dragPivotToJoint('armRLower'); } },
         { say: 'Keys are always set at the playhead, the pink line. I\'ll drag it to five hundred milliseconds.', do: async (T) => { await T.scrubTo(500, 1200); } },
-        { say: 'Now I rotate the right upper arm up, around the shoulder.', do: async (T) => { await T.rotatePartTo('armRUpper', -100, { ms: 1600 }); } },
+        { say: 'Now I turn the upper arm up. The forearm comes with it.', do: async (T) => { await T.rotatePartTo('armRUpper', -100, { ms: 1600 }); } },
         { say: 'See the diamonds in the timeline? The studio also added rest keys at the start and the end, so the arm rises from its normal position and comes back down by itself.',
           do: async (T) => { const row = T.partRow('armRUpper'); T.showRow(row); await T.wait(200); T.highlight(T.partRow('armRUpper'), 'Keys for the upper arm'); await T.wait(3500); T.unhighlight(); } },
         { say: 'Next, I bend the forearm at the elbow, so the hand points up.', do: async (T) => { await T.rotatePartTo('armRLower', -60, { ms: 1300 }); } },
@@ -100,8 +101,8 @@
         { say: 'At eight hundred milliseconds, I tilt the forearm out,', do: async (T) => { await T.scrubTo(800); await T.rotatePartTo('armRLower', -25, { ms: 900 }); } },
         { say: 'at eleven hundred, back in,', do: async (T) => { await T.scrubTo(1100); await T.rotatePartTo('armRLower', -75, { ms: 900 }); } },
         { say: 'and at fourteen hundred, out again.', do: async (T) => { await T.scrubTo(1400); await T.rotatePartTo('armRLower', -25, { ms: 900 }); } },
-        { say: 'The upper arm would start dropping while it waves. To hold it up, I go to fifteen hundred, select the upper arm, and type minus one hundred into the rotate box in the inspector.',
-          do: async (T) => { await T.scrubTo(1500); await T.clickPart('armRUpper'); const input = T.card('Right arm').querySelector('.f input[type=number]'); T.highlight(input, '', { pad: 4 }); await T.type(input, '-100'); T.unhighlight(); } },
+        { say: 'The upper arm would start dropping while it waves. To hold it up, I go to fifteen hundred, select the upper arm, and type minus one hundred into the turn box in the inspector.',
+          do: async (T) => { await T.scrubTo(1500); await T.clickPart('armRUpper'); const input = T.field(T.card('Right arm'), 'Turn'); T.highlight(input, '', { pad: 4 }); await T.type(input, '-100'); T.unhighlight(); } },
         { say: 'Typing a number sets a key at the playhead, just like dragging does. Let\'s watch it.', do: async (T) => { await T.wait(400); await play(T, 2300); await T.wait(300); await play(T, 2300); } },
       ],
     },
@@ -109,7 +110,7 @@
       title: 'The timeline and easing',
       steps: [
         { say: 'Now a closer look at the timeline.' },
-        { say: 'Click the little arrow next to a part\'s name to open its rows: rotate, move X and Y, and the two scales.', do: async (T) => { const row = T.partRow('armRUpper'); T.showRow(row); await T.click(T.partRow('armRUpper').querySelector('.tw')); } },
+        { say: 'Click the little arrow next to a part\'s name to open its rows: X, Y, turn, size, and opacity.', do: async (T) => { const row = T.partRow('armRUpper'); T.showRow(row); await T.click(T.partRow('armRUpper').querySelector('.tw')); } },
         { say: 'Drag a keyframe left or right to change its timing. I\'ll make the arm go up a little sooner.', do: async (T) => { await T.dragTimeline(T.diamond('armRUpper', 500), -120); } },
         { say: 'Right click a key to choose its easing: how the motion travels from this key to the next. Out Back overshoots a little, which feels bouncy.',
           do: async (T) => { await T.rightClick(T.diamond('armRUpper', 0)); await T.wait(700); await T.click(T.button('outBack', '#ctxMenu')); } },
@@ -139,7 +140,7 @@
             }
             await T.stageDrag([x0, y0], [x1, y1], { ms: 1300 });
           } },
-        { say: 'A drag now turns them all by the same amount. The eyes, mouth, and hair are children of the face, so they simply follow it, and nothing turns twice.',
+        { say: 'A drag now turns them all as one group, around the pivot of the part I grab. Here the whole head tilts around the middle of the face.',
           do: async (T) => { await T.rotatePart('face', 9, { ms: 1300, grab: () => partPoint('face', 0.85, 0.35) }); } },
         { say: 'Press K to key every selected part at the playhead, and Control A to select every part.', do: async (T) => { await T.key('k'); await T.wait(400); await T.key('Escape'); } },
       ],

@@ -6,9 +6,10 @@ Each release's section here becomes its GitHub release notes.
 
 The first release.
 
-- Keyframe EasyTuber actions on the real rig with the Rotate, Move and Scale tools (R, M, S; Shift moves and Alt scales with any tool). Every drag sets a key at the playhead.
-- The selected part's pivot, the point it turns around, shows as a pink crosshair; pointing at a part shows its name. Paused, the stage shows the pose at full strength; the blend fades show while playing.
-- Pose several parts at once: Ctrl+click parts, or drag a box on the stage. A drag, a typed value, **K** or a paste applies to every selected part; a part whose parent is selected follows it instead of turning twice.
+- Free motion: every part is its own layer on the 1920×1080 stage. Move it anywhere, turn and size it around a pivot you drag wherever you like (Ctrl snaps to the joint, middle, edges, corners), and fade it. Parts move on their own; "children go with it" links a part's children when you want.
+- Joint motion (EasyTuber's rig) is still there, one switch away (F / J).
+- Rotate, Move and Scale tools (R, M, S; Shift moves and Alt scales with any tool). Every drag sets a key at the playhead. Paused, the stage shows the pose at full strength; the blend fades show while playing.
+- Pose several parts at once: Ctrl+click parts, or drag a box on the stage. A drag, a typed value, **K** or a paste applies to every selected part; turning or scaling a group swings it round the grabbed part's pivot.
 - Timeline with a row per part (open it up for Rotate / Move / Scale), easing per key, box-select keys with Shift+drag, move several keys together, copy and paste.
 - Eyes, mouth and expression tracks, parts drawn in front, sounds, and effects: sparkles, music notes, motion marks, emoji burst, captions with Streamer.bot values, and your own pictures.
 - Held actions with a loop and a release, tested with Turn on / Turn off.

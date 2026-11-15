@@ -189,7 +189,8 @@
         }
         out.push(row);
         if (!open) continue;
-        for (const prop of S.Model.PROPS) {
+        const rowProps = [...S.Model.FREE_PROPS, ...S.Model.JOINT_PROPS.filter((pr) => tr[pr] || S.Tools.space === 'joint')];
+        for (const prop of rowProps) {
           const keys = tr[prop] || [];
           const on = keys.some((k) => k.t === now);
           const addp = el('button', { class: 'addkey' + (on ? ' on' : ''), title: 'Key at the playhead', onclick: (e) => { e.stopPropagation(); S.App.edit((q) => S.App.keyValue(q, id, prop, now, S.Model.valueAt(q, id, prop, now))); } }, '◆');

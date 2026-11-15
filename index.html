@@ -49,12 +49,15 @@
     <main id="stageWrap">
       <canvas id="stage"></canvas>
       <div id="stageTools">
-        <button data-tool="rotate" title="Rotate (R): drag turns a part around its pivot, the pink crosshair">↻ Rotate <kbd>R</kbd></button>
+        <span class="seg" title="Free: parts move anywhere on the 1920×1080 stage around a pivot you place. Joint: EasyTuber's own joints.">
+          <button data-space="free">Free <kbd>F</kbd></button><button data-space="joint">Joint <kbd>J</kbd></button>
+        </span>
+        <button data-tool="rotate" title="Rotate (R): drag turns a part around its pivot, the pink crosshair. In Free mode, drag the crosshair to put the pivot anywhere.">↻ Rotate <kbd>R</kbd></button>
         <button data-tool="move" title="Move (M): drag shifts a part. Shift+drag also moves.">✥ Move <kbd>M</kbd></button>
         <button data-tool="scale" title="Scale (S): drag up to grow, down to shrink. Alt+drag also scales.">⤢ Scale <kbd>S</kbd></button>
         <label class="check" title="Show every part's pivot (the point it turns around)"><input type="checkbox" id="optPivots" checked> Pivots</label>
       </div>
-      <div id="stageHint">Click a part to select it · Ctrl+click or drag a box for several · Shift+drag: move · Alt+drag: scale · wheel: zoom · middle-drag: pan</div>
+      <div id="stageHint">Click a part to select it · drag the pink pivot to move it (Ctrl snaps) · Ctrl+click or drag a box for several · Shift+drag: move · Alt+drag: scale · wheel: zoom · middle-drag: pan</div>
       <div id="pickBanner" hidden><span>Click the avatar where the effect should be</span> <button id="btnPickCancel">Cancel</button></div>
       <div id="defError" hidden></div>
     </main>

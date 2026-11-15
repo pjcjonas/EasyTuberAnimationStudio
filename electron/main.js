@@ -170,6 +170,8 @@ function createWindow() {
     },
   });
   win.loadURL('app://studio/index.html');
+  // Chromium remembers a zoom per site: start at 100% (the video recorder zooms its own window)
+  if (!rec) win.webContents.on('did-finish-load', () => win.webContents.setZoomFactor(1));
   if (process.env.STUDIO_SHOT) devShot();
   if (rec) devRecord();
   win.on('close', (e) => {

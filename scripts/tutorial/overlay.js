@@ -178,11 +178,21 @@
   };
   // turn a part so its key at the playhead becomes `target` degrees
   T.rotatePartTo = async (id, target, opts = {}) => {
-    const t = Math.round(S.App.playhead());
-    const now = S.Model.valueAt(S.App.project, id, 'rot', t), k = S.App.factorAt(t);
+    const t = Math.round(S.App.playhead()), prop = S.Tools.space === 'free' ? 'angle' : 'rot';
+    const now = S.Model.valueAt(S.App.project, id, prop, t), k = S.App.factorAt(t);
     await T.rotatePart(id, (target - now) * (k > 0.15 ? k : 1), opts);
     // land exactly on the number (the idle sway moves the joint a little while dragging)
-    S.App.edit((p) => S.App.keyValue(p, id, 'rot', t, target), { source: 'inspector' });
+    S.App.edit((p) => S.App.keyValue(p, id, prop, t, target), { source: 'inspector' });
+  };
+  // drag a selected part's pivot onto its EasyTuber joint, Ctrl held to snap
+  T.dragPivotToJoint = async (id) => {
+    const from = T.toClient(S.Tools.joint(id)), to = T.toClient(S.Tools.rigJoint(id));
+    await T.stageDrag(from, [to[0] + 4, to[1] + 3], { ms: 1100, mods: { ctrlKey: true } });
+  };
+  // the input of an Inspector row by its label
+  T.field = (card, label) => {
+    const row = [...card.querySelectorAll('.f')].find((f) => f.firstElementChild && f.firstElementChild.textContent.trim() === label);
+    return row && row.querySelector('input');
   };
   T.dragPart = async (id, dx, dy, opts = {}) => {
     const c = T.toClient(T.grabPoint(id));

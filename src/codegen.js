@@ -44,15 +44,68 @@
   }
 
   /* ---------- the parts of the file ---------- */
-  function keysSource(p) {
+  function keysSource(p, props) {
     const lines = [];
-    for (const [part, props] of Object.entries(p.tracks)) {
-      const inner = Object.entries(props)
-        .filter(([, keys]) => keys.length)
-        .map(([prop, keys]) => `${prop}: [${keys.map((k) => `[${k.t}, ${k.v}, ${J(k.ease)}]`).join(', ')}]`);
+    for (const [part, tr] of Object.entries(p.tracks)) {
+      const inner = props.filter((prop) => tr[prop] && tr[prop].length)
+        .map((prop) => `${prop}: [${tr[prop].map((k) => `[${k.t}, ${k.v}, ${J(k.ease)}]`).join(', ')}]`);
       if (inner.length) lines.push(`    ${J(part)}: { ${inner.join(', ')} },`);
     }
-    return lines.length ? `{\n${lines.join('\n')}\n  }` : '{}';
+    return lines.length ? `{\n${lines.join('\n')}\n  }` : null;
+  }
+
+  // the free motion: per part, a map of the stage (rotate + scale + move) built once a frame, children
+  // going with their parent; parts() hands the renderer each part's share of it
+  function freeSource(p, free, env, strength) {
+    const pivots = {};
+    for (const [part, pv] of Object.entries(p.pivots)) pivots[part] = pv.joint ? 'joint' : [pv.u, pv.v];
+    const linked = Object.keys(p.follow).filter((k) => p.follow[k] === true);
+    return `
+  // free motion on the 1920x1080 stage: [ms, value, ease to the next key]. x / y in stage pixels,
+  // angle in degrees (clockwise), size 1 = as drawn, opacity 0..1; around each part's pivot
+  const FREE = ${free};
+  // pivots: [across, down] the part's drawing (0..1, or beyond it), or 'joint' (the joint the avatar
+  // gives the part); the middle when not listed
+  const PIVOT = ${J(pivots)};
+  // every part moves on its own, except the children of these parts, which go with them
+  const LINKED = ${J(linked)};
+
+  // a map of the stage [a, b, tx, ty]: (x, y) -> (a x - b y + tx, b x + a y + ty)
+  const mapPoint = (m, x, y) => [m[0] * x - m[1] * y + m[2], m[1] * x + m[0] * y + m[3]];
+  const mapThen = (m, n) => [m[0] * n[0] - m[1] * n[1], m[1] * n[0] + m[0] * n[1], ...mapPoint(m, n[2], n[3])];
+  // where a part's pivot is on the stage now
+  function pivotAt(a, id) {
+    const pv = PIVOT[id];
+    if (pv === 'joint') {
+      const part = a.project && a.project.parts && a.project.parts[id];
+      const img = part && PT.Assets && PT.Assets.primary(id, a.project.stage && a.project.stage.placeholders);
+      if (img) return a.at(id, part.px / img.w, part.py / img.h);
+    }
+    const [u, v] = Array.isArray(pv) ? pv : [0.5, 0.5];
+    return a.atArt(id, u, v);
+  }
+  function freeMaps(a) {
+    const now = performance.now(), st = a.state;
+    if (st.free && now - st.free.t < 4) return st.free;   // once a frame
+    const ms = time(a), k = ${env}${strength}, maps = {}, alpha = {};
+    for (const d of PT.PARTS) {
+      const up = d.parent && LINKED.includes(d.parent) ? maps[d.parent] : null;
+      let m = up || null;
+      const f = FREE[d.id];
+      if (f) {
+        const val = (prop, rest) => (f[prop] ? rest + (sample(f[prop], ms) - rest) * k : rest);
+        const turn = val('angle', 0) * Math.PI / 180, size = Math.max(0, val('size', 1));
+        const [px, py] = pivotAt(a, d.id);
+        const c = size * Math.cos(turn), s = size * Math.sin(turn);
+        // turn and size around the pivot, then move by x / y
+        const own = [c, s, px + val('x', 0) - (c * px - s * py), py + val('y', 0) - (s * px + c * py)];
+        m = m ? mapThen(m, own) : own;
+        if (f.opacity) alpha[d.id] = Math.max(0, Math.min(1, val('opacity', 1)));
+      }
+      if (m) maps[d.id] = m;
+    }
+    return (st.free = { t: now, maps, alpha });
+  }`;
   }
 
   function statesSource(p) {
@@ -96,7 +149,8 @@
     const p = Model.normalize(project);
     p.effects = p.effects.filter((e) => Effects.BY_ID[e.preset]);
     const states = statesSource(p);
-    const hasKeys = Object.keys(p.tracks).length > 0;
+    const jointKeys = keysSource(p, Model.JOINT_PROPS), freeKeys = keysSource(p, Model.FREE_PROPS);
+    const hasKeys = !!jointKeys;
     const fxLayers = new Set(p.effects.map((e) => e.layer));
     const media = mediaFiles(p);
     const env = p.hold ? `a.envelope(${p.blend.in})` : `a.envelope(${p.blend.in}, ${p.blend.out})`;
@@ -118,7 +172,8 @@
     body.push('  ' + Interp.SOURCE.trim());
     body.push('');
     body.push(timeSource(p));
-    if (hasKeys) body.push('', '  // part motion: [ms, value, ease to the next key]. rot in degrees, ox / oy in rig units, sx / sy multiply', `  const KEYS = ${keysSource(p)};`);
+    if (hasKeys) body.push('', '  // joint motion (EasyTuber\'s rig): [ms, value, ease to the next key]. rot in degrees, ox / oy in rig units, sx / sy multiply', `  const KEYS = ${jointKeys};`);
+    if (freeKeys) body.push(freeSource(p, freeKeys, env, strength));
     if (states) body.push('', '  // eyes / mouth / expression from that ms on (\'\' = back to normal)', `  const STATES = ${states};`);
     if (p.inFront.length) body.push('', '  // parts drawn on top of the rest: [from ms, to ms, part ids]', `  const IN_FRONT = [${p.inFront.map((r) => `[${r.from}, ${r.to}, ${J(r.parts)}]`).join(', ')}];`);
     if (p.sounds.length) body.push('', '  // sounds: [from ms, file, volume, loop]', `  const SOUNDS = [${p.sounds.map((s) => `[${s.t}, ${J(mediaPath(p, s.file))}, ${s.volume}${s.loop ? ', true' : ''}]`).join(', ')}];`);
@@ -135,7 +190,9 @@
     const ms = time(a), size = a.artSize('face').w || 200, fade = a.held ? a.envelope(${p.blend.in}) : 1;
     EFFECTS.forEach((e, i) => {
       if (e.layer !== layer || ms < e.from || ms > e.to || (e.toggle && a.settings[e.toggle] === false)) return;
-      const [x, y] = a.atArt(e.part, e.u, e.v);
+      let [x, y] = a.atArt(e.part, e.u, e.v);${freeKeys ? `
+      const m = freeMaps(a).maps[e.part];   // on a part that moves freely, it goes with it
+      if (m) [x, y] = mapPoint(m, x, y);` : ''}
       g.globalAlpha = fade;
       e.draw(a, g, e.o, (ms - e.from) / Math.max(1, e.to - e.from), x, y, size, a.state.fx ? a.state.fx[i] : null);
     });
@@ -166,6 +223,20 @@
       } else lines.push('      return null;');
       lines.push('    },');
       def.push(...lines);
+    }
+    if (freeKeys) {
+      def.push('', '    // free motion: this part\'s turn, size and move on the stage (around its middle, as the renderer wants it)',
+        '    parts(a, id) {',
+        '      const { maps, alpha } = freeMaps(a), m = maps[id];',
+        '      if (!m && alpha[id] === undefined) return null;',
+        '      const out = {};',
+        '      if (m) {',
+        '        const [cx, cy] = a.atArt(id, 0.5, 0.5), [x, y] = mapPoint(m, cx, cy);',
+        '        Object.assign(out, { dx: x - cx, dy: y - cy, rot: Math.atan2(m[1], m[0]) * 180 / Math.PI, scale: Math.hypot(m[0], m[1]) });',
+        '      }',
+        '      if (alpha[id] !== undefined) { out.alpha = alpha[id]; if (alpha[id] <= 0.001) out.hide = true; }',
+        '      return out;',
+        '    },');
     }
     if (states) {
       def.push('', '    states(a) {',

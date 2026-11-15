@@ -1,8 +1,14 @@
 /* The studio's project: one action being made. Saved as <name>.etaction.json, and embedded in every
    exported action file so the file can be opened again for editing.
 
-   Times are in ms from the start of the action. Part motion is additive like EasyTuber's pose():
-   rot (degrees, clockwise), ox / oy (rig units) are added; sx / sy multiply (1 = unchanged). */
+   Times are in ms from the start of the action. A part moves two ways:
+     free   x / y (stage pixels on the 1920x1080 stage), angle (degrees, clockwise), size (1 = as
+            drawn) and opacity (0..1), around a pivot of your own: pivots[part] = { u, v } (0..1
+            across and down the part's drawing, or beyond it), or { joint: true } (the joint the
+            playing avatar gives the part, so it fits any avatar); the middle if not set. Every part
+            moves on its own; follow[part] === true makes the parts hanging from it go with it.
+     joint  EasyTuber's own rig motion around the joint the avatar gives the part: rot (degrees),
+            ox / oy (rig units) are added, sx / sy multiply. Children always follow. */
 (function (root, factory) {
   const lib = factory(typeof module === 'object' && module.exports ? require('./interp') : root.Studio.Interp);
   if (typeof module === 'object' && module.exports) module.exports = lib;
@@ -11,9 +17,17 @@
   const FORMAT = 'easytuber-action-studio';
   const ID = /^[\w-]{1,40}$/;
   const PART_ID = /^([a-zA-Z]{1,20}|c_[a-z0-9]{1,16})$/;
-  const PROPS = ['rot', 'ox', 'oy', 'sx', 'sy'];
-  const REST = { rot: 0, ox: 0, oy: 0, sx: 1, sy: 1 };
-  const PROP_LABEL = { rot: 'Rotate', ox: 'Move X', oy: 'Move Y', sx: 'Scale X', sy: 'Scale Y' };
+  const FREE_PROPS = ['x', 'y', 'angle', 'size', 'opacity'];
+  const JOINT_PROPS = ['rot', 'ox', 'oy', 'sx', 'sy'];
+  const PROPS = [...FREE_PROPS, ...JOINT_PROPS];
+  const REST = { x: 0, y: 0, angle: 0, size: 1, opacity: 1, rot: 0, ox: 0, oy: 0, sx: 1, sy: 1 };
+  const PROP_LABEL = {
+    x: 'X', y: 'Y', angle: 'Turn', size: 'Size', opacity: 'Opacity',
+    rot: 'Joint turn', ox: 'Joint move X', oy: 'Joint move Y', sx: 'Joint scale X', sy: 'Joint scale Y',
+  };
+  // how a value is shown and typed: percent props are stored as fractions
+  const PERCENT = new Set(['size', 'opacity', 'sx', 'sy']);
+  const UNIT = { x: 'px', y: 'px', angle: '°', size: '%', opacity: '%', rot: '°', ox: 'rig', oy: 'rig', sx: '%', sy: '%' };
   const STATE_TRACKS = ['eyes', 'mouth', 'expression'];
   const STATE_VALUES = { eyes: ['open', 'half', 'closed'], mouth: ['closed', 'half', 'open'] };
   const MIN_MS = 100, MAX_MS = 60000, MAX_RELEASE = 5000;
@@ -34,6 +48,8 @@
       blend: { in: 300, out: 400 },
       strength: { on: true, default: 100, max: 150 },
       tracks: {},
+      pivots: {},        // free pivot per part: { u, v } or { joint: true }
+      follow: {},        // true: the parts hanging from this one go with its free motion (off by default)
       states: { eyes: [], mouth: [], expression: [] },
       inFront: [],
       sounds: [],
@@ -91,6 +107,19 @@
         if (keys.length) tr[prop] = keys;
       }
       if (Object.keys(tr).length) out.tracks[part] = tr;
+      for (const k of tr.opacity || []) k.v = clamp(k.v, 0, 1);
+      for (const k of tr.size || []) k.v = Math.max(0, k.v);
+    }
+    out.pivots = {};
+    for (const [part, pv] of Object.entries(p.pivots && typeof p.pivots === 'object' ? p.pivots : {})) {
+      if (!PART_ID.test(part) || !pv) continue;
+      if (pv.joint === true) { out.pivots[part] = { joint: true }; continue; }
+      if (!Number.isFinite(+pv.u) || !Number.isFinite(+pv.v)) continue;
+      out.pivots[part] = { u: round(clamp(+pv.u, -5, 6)), v: round(clamp(+pv.v, -5, 6)) };
+    }
+    out.follow = {};
+    for (const [part, f] of Object.entries(p.follow && typeof p.follow === 'object' ? p.follow : {})) {
+      if (PART_ID.test(part) && f === true) out.follow[part] = true;
     }
     const st = p.states || {};
     out.states = {
@@ -199,9 +228,12 @@
       if (!src || !p.tracks[a]) continue;
       const copy = {};
       for (const [prop, keys] of Object.entries(p.tracks[a])) {
-        copy[prop] = keys.map((k) => ({ ...k, v: prop === 'rot' || prop === 'ox' ? round(-k.v) : k.v }));
+        copy[prop] = keys.map((k) => ({ ...k, v: ['rot', 'ox', 'angle', 'x'].includes(prop) ? round(-k.v) : k.v }));
       }
       p.tracks[b] = copy;
+      // the other arm's drawing is a mirror image: its pivot is mirrored across too
+      if (p.pivots[a]) p.pivots[b] = p.pivots[a].joint ? { joint: true } : { u: round(1 - p.pivots[a].u), v: p.pivots[a].v };
+      if (p.follow[a] === true) p.follow[b] = true; else delete p.follow[b];
     }
   }
 
@@ -235,7 +267,7 @@
   }
 
   return {
-    FORMAT, ID, PART_ID, FILE, PROPS, REST, PROP_LABEL, STATE_TRACKS, STATE_VALUES, MIN_MS, MAX_MS, MAX_RELEASE, MEDIA_PREFIXES,
+    FORMAT, ID, PART_ID, FILE, PROPS, FREE_PROPS, JOINT_PROPS, REST, PROP_LABEL, PERCENT, UNIT, STATE_TRACKS, STATE_VALUES, MIN_MS, MAX_MS, MAX_RELEASE, MEDIA_PREFIXES,
     newProject, normalize, track, valueAt, setKey, removeKey, moveKey, setStateKey, stateAt, keyTimes, mirror, setDuration, uniqueId,
   };
 });

@@ -234,7 +234,8 @@
     // key the properties a part already moves (or its rotation) at time t, with their values there
     keyPartAt(q, id, t) {
       const tr = q.tracks[id] || {};
-      const props = Object.keys(tr).length ? Object.keys(tr) : ['rot'];
+      const mine = Object.keys(tr).filter((prop) => S.Tools.props.includes(prop));
+      const props = mine.length ? mine : S.Tools.space === 'free' ? ['x', 'y', 'angle'] : ['rot'];
       for (const prop of props) this.keyValue(q, id, prop, t, S.Model.valueAt(q, id, prop, t));
     },
     keyPart(id) { this.keyParts(id ? [id] : []); },
@@ -461,7 +462,7 @@
       try { runtime = (await (await fetch('runtime/easytuber/VERSION')).text()).trim(); } catch (e) { /* unknown */ }
       const a = (href, text) => el('a', { href, target: '_blank', rel: 'noopener' }, text);
       const keys = [
-        ['R  M  S', 'rotate / move / scale tool (Shift: move, Alt: scale)'], ['Space', 'play / pause'], [', .', 'previous / next key'], ['← →', 'move the playhead (Shift: 100 ms)'],
+        ['F  J', 'free motion (anywhere, your own pivot) / EasyTuber joints'], ['R  M  S', 'rotate / move / scale tool (Shift: move, Alt: scale)'], ['drag pivot', 'move a part\'s pivot anywhere (Ctrl snaps)'], ['Space', 'play / pause'], [', .', 'previous / next key'], ['← →', 'move the playhead (Shift: 100 ms)'],
         ['Ctrl+click', 'select several parts (stage or timeline)'], ['drag on stage', 'box-select parts'], ['Ctrl+A', 'select every part'],
         ['K', 'key the selected parts'], ['Shift+drag', 'box-select keys (timeline)'], ['Ctrl+C / V', 'copy / paste keys (onto the selected parts)'],
         ['Del', 'delete'], ['Ctrl+Z / Y', 'undo / redo'], ['Ctrl+S, Ctrl+E', 'save, export'],
@@ -590,6 +591,8 @@
           else if (k === 'r') S.Tools.setTool('rotate');
           else if (k === 'm') S.Tools.setTool('move');
           else if (k === 's') S.Tools.setTool('scale');
+          else if (k === 'f') S.Tools.setSpace('free');
+          else if (k === 'j') S.Tools.setSpace('joint');
       }
     },
   };

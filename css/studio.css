@@ -186,3 +186,9 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 #stage[data-tool=rotate].over { cursor: grab; }
 #stage[data-tool=move].over { cursor: move; }
 #stage[data-tool=scale].over { cursor: ns-resize; }
+#stageTools .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-right: 6px; }
+#stageTools .seg button { border-radius: 0; padding: 4px 9px; }
+#stageTools .seg button.on { background: #5fd39a; color: #10231a; }
+.card h5 { margin: 10px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+.card h5 .grow { flex: 1; }
+.card .stagepos { font: 11px Consolas, monospace; color: var(--dim); margin: 2px 0 6px; }
