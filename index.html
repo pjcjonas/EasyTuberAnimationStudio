@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- unsafe-eval: the preview runs the action file it is about to export (src/preview.js) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'">
+  <title>EasyTuber Animation Studio</title>
+  <link rel="stylesheet" href="css/studio.css">
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div class="brand">EasyTuber <span>Animation Studio</span></div>
+      <div class="group">
+        <button id="btnNew" title="New action (Ctrl+N)">New</button>
+        <button id="btnOpen" title="Open a studio project or an action made with the studio (Ctrl+O)">Open…</button>
+        <button id="btnSave" title="Save the studio project (Ctrl+S)">Save</button>
+        <div class="menu">
+          <button id="btnExport" class="primary" title="Export the action file (Ctrl+E)">Export ▾</button>
+          <div class="menu-list" id="exportMenu" hidden>
+            <button data-cmd="exportSave">Save action as… <kbd>Ctrl+E</kbd></button>
+            <button data-cmd="exportCopy">Copy action code</button>
+            <hr>
+            <button data-cmd="saveAs">Save project as…</button>
+          </div>
+        </div>
+      </div>
+      <div class="group fields">
+        <label title="The action's file name and Streamer.bot id: letters, digits, - or _">Id <input id="fId" spellcheck="false" maxlength="40"></label>
+        <label title="Shown in EasyTuber's Actions tab">Name <input id="fLabel" maxlength="60"></label>
+        <label title="Length of the timeline in ms (100 to 60000)">Length <input id="fDuration" type="number" min="100" max="60000" step="100"> ms</label>
+        <label class="check" title="A held action stays on until it is turned off"><input type="checkbox" id="fHold"> Held</label>
+      </div>
+      <div class="group right">
+        <button id="btnUndo" title="Undo (Ctrl+Z)">↶</button>
+        <button id="btnRedo" title="Redo (Ctrl+Y)">↷</button>
+        <div class="menu">
+          <button id="btnAbout" title="About, shortcuts and licence">?</button>
+          <div class="menu-list about" id="aboutBox" hidden></div>
+        </div>
+        <select id="rigPick" title="The avatar the action is previewed on">
+          <option value="placeholder">Placeholder rig</option>
+          <option value="avatar">My EasyTuber avatar</option>
+          <option value="pick">Other avatar file…</option>
+        </select>
+      </div>
+    </header>
+
+    <main id="stageWrap">
+      <canvas id="stage"></canvas>
+      <div id="stageHint">Click a part · Ctrl+click or drag a box for several · drag: rotate · Shift+drag: move · Alt+drag: scale · wheel: zoom · middle-drag: pan</div>
+      <div id="pickBanner" hidden><span>Click the avatar where the effect should be</span> <button id="btnPickCancel">Cancel</button></div>
+      <div id="defError" hidden></div>
+    </main>
+
+    <aside id="side">
+      <nav class="tabs">
+        <button data-tab="inspector" class="on">Inspector</button>
+        <button data-tab="codeView">Code</button>
+      </nav>
+      <div id="inspector" class="tab-body"></div>
+      <div id="codeView" class="tab-body" hidden>
+        <div class="code-bar">
+          <button id="btnCopyCode">Copy code</button>
+          <button id="btnExportCode" class="primary">Save action as…</button>
+        </div>
+        <div id="codeIssues"></div>
+        <pre id="codeText"></pre>
+      </div>
+    </aside>
+
+    <section id="transport">
+      <button id="btnStart" title="Go to the start (Home)">⏮</button>
+      <button id="btnPrevKey" title="Previous key (,)">◂◆</button>
+      <button id="btnPlay" class="primary play" title="Play / pause (Space)">▶</button>
+      <button id="btnNextKey" title="Next key (.)">◆▸</button>
+      <span id="timeReadout">0 ms</span>
+      <label class="check" id="loopWrap"><input type="checkbox" id="optLoop" checked> Loop</label>
+      <select id="optSpeed" title="Playback speed">
+        <option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option>
+      </select>
+      <span id="heldControls" hidden>
+        <button id="btnHeldOn" title="Play it the way EasyTuber does: on until it is turned off">▶ Turn on</button>
+        <button id="btnHeldOff">■ Turn off</button>
+      </span>
+      <span class="spacer"></span>
+      <label class="check" title="EasyTuber's breathing, blinking and sway under the action"><input type="checkbox" id="optIdle" checked> Idle motion</label>
+      <label class="check" title="Pretend to talk, to see the action with the mouth moving"><input type="checkbox" id="optTalk"> Talking</label>
+      <select id="optBg" title="Background">
+        <option value="checker">Checker</option><option value="green">Green</option><option value="dark">Dark</option><option value="light">Light</option>
+      </select>
+      <button id="btnFit" title="Zoom in on the avatar">Fit</button>
+    </section>
+
+    <section id="timeline"></section>
+  </div>
+
+  <div id="toasts"></div>
+  <div id="ctxMenu" hidden></div>
+
+  <!-- EasyTuber's own runtime, unmodified (npm run sync-runtime) -->
+  <script src="runtime/easytuber/util.js"></script>
+  <script src="runtime/easytuber/defs.js"></script>
+  <script src="runtime/easytuber/placeholder.js"></script>
+  <script src="runtime/easytuber/assets.js"></script>
+  <script src="runtime/easytuber/animator.js"></script>
+  <script src="runtime/easytuber/actions.js"></script>
+  <script src="runtime/easytuber/renderer.js"></script>
+  <!-- the studio -->
+  <script src="src/interp.js"></script>
+  <script src="src/model.js"></script>
+  <script src="src/effects.js"></script>
+  <script src="src/codegen.js"></script>
+  <script src="src/preview.js"></script>
+  <script src="src/stage-tools.js"></script>
+  <script src="src/timeline.js"></script>
+  <script src="src/inspector.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>

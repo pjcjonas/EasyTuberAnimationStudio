@@ -1,0 +1,49 @@
+EasyTuber Animation Studio
+Copyright (C) 2026 pjcjonas (https://github.com/pjcjonas)
+Original project: https://github.com/pjcjonas/EasyTuberAnimationStudio
+
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, version 3 of the License,
+with the additional terms and the additional permission below (section 7 of the License). See the
+LICENSE file for the full text.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+General Public License for more details.
+
+
+ADDITIONAL TERMS (GNU GPL version 3, section 7)
+
+a) Author attribution (section 7(b)). Every copy and every modified version of this program, in
+   source or in any other form, must keep this NOTICE file and the following attributions intact:
+
+       Based on EasyTuber Animation Studio, created by pjcjonas — https://github.com/pjcjonas/EasyTuberAnimationStudio
+       Based on EASY-TUBER, created by pjcjonas — https://github.com/pjcjonas/EasyTuber
+
+   A version with a user interface that displays Appropriate Legal Notices (for example an
+   "About" screen, credits or a licence page) must include these attributions in them.
+
+b) Origin and modified versions (section 7(c)). You may not misrepresent the origin of this
+   program. A modified version must be marked as changed from the original, in a reasonable way,
+   and must not be presented as the original EasyTuber Animation Studio or EASY-TUBER, or as made
+   by their author.
+
+
+ADDITIONAL PERMISSION (GNU GPL version 3, section 7)
+
+The action files this program exports are yours. The code it writes into them (the keyframe
+sampler from src/interp.js, the effect presets from src/effects.js and the code around them) may
+be used, changed and shared under any terms you like, with or without this NOTICE.
+
+
+INCLUDED CODE
+
+runtime/easytuber/ holds files from EASY-TUBER, unmodified:
+
+    Based on EASY-TUBER, created by pjcjonas — https://github.com/pjcjonas/EasyTuber
+
+EASY-TUBER is licensed under the GNU General Public License version 3 with additional terms; see
+https://github.com/pjcjonas/EasyTuber/blob/main/NOTICE.
+
+The desktop builds include Electron (https://www.electronjs.org/), under the MIT License; its
+licence files are included in each build.

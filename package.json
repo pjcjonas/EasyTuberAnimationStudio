@@ -1,0 +1,24 @@
+{
+  "name": "easytuber-animation-studio",
+  "productName": "EasyTuber Animation Studio",
+  "version": "0.1.0",
+  "description": "Keyframe EasyTuber actions on the real rig and export the action file.",
+  "main": "electron/main.js",
+  "private": true,
+  "repository": "github:pjcjonas/EasyTuberAnimationStudio",
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "pjcjonas (https://github.com/pjcjonas)",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"tests/*.test.js\"",
+    "sync-runtime": "node scripts/sync-runtime.js",
+    "icon": "python build/make-icon.py",
+    "dist": "npm run dist:win",
+    "dist:win": "electron-packager . EasyTuberStudio --platform=win32 --arch=x64 --out=dist --overwrite --icon=build/icon.ico --prune=true --ignore=\"^/(dist|tests|scripts|build/make-icon\\.py|build/icon\\.icns|\\.claude|\\.github|\\.gitignore|\\.gitattributes|README\\.md|CHANGELOG\\.md|RELEASING\\.md)\" --app-copyright=\"EasyTuber Animation Studio\" --win32metadata.ProductName=\"EasyTuber Animation Studio\" --win32metadata.FileDescription=\"EasyTuber Animation Studio\"",
+    "dist:mac": "electron-packager . EasyTuberStudio --platform=darwin --arch=x64,arm64 --out=dist --overwrite --icon=build/icon.icns --prune=true --ignore=\"^/(dist|tests|scripts|build/make-icon\\.py|build/icon\\.ico|\\.claude|\\.github|\\.gitignore|\\.gitattributes|README\\.md|CHANGELOG\\.md|RELEASING\\.md)\" --app-copyright=\"EasyTuber Animation Studio\" --app-bundle-id=com.pjcjonas.easytuberstudio --app-category-type=public.app-category.graphics-design"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^45.2.3"
+  }
+}
