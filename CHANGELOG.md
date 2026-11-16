@@ -2,6 +2,14 @@
 
 Each release's section here becomes its GitHub release notes.
 
+## 1.1.0
+
+- The timeline now works like Flash / Adobe Animate: a frame grid at the action's frame rate (24 fps by default), frame numbers on the ruler, the red playhead, one layer per part (front-most at the top), keyframes and blank keyframes, grey still spans and blue tweens with an arrow. Lengths and times are in frames; the exported file still runs in ms.
+- Flash's frame commands: F5 / Shift+F5 insert / remove frames, F6 / Shift+F6 insert / clear keyframes, F7 blank keyframe, Create Classic Tween / Remove Tween and eases, copy / cut / paste / clear / select all frames (Ctrl+Alt+C / X / V, Alt+Backspace, Ctrl+Alt+A) and Reverse Frames. Select frames by clicking or dragging a block; drag keyframes or a selection (Alt+drag copies).
+- Groups (Ctrl+G / Ctrl+Shift+G): parts moved, turned, sized and faded together around a pivot of their own, with their own layer, as folders in the timeline. Click a part to pick its group; double-click to edit inside it. Groups can be nested, and they are exported.
+- The eye and the lock on every layer (hide it in the studio; keep it from being picked on the stage), onion skin, Auto keyframe (off: Flash's classic way, a change edits the keyframe its frame belongs to), frame sizes, Enter to play and , . to step frames.
+- The timeline can be made taller or shorter (drag its top edge) and zoomed (Ctrl+wheel, - =).
+
 ## 1.0.0
 
 The first release.

@@ -8,7 +8,16 @@
             playing avatar gives the part, so it fits any avatar); the middle if not set. Every part
             moves on its own; follow[part] === true makes the parts hanging from it go with it.
      joint  EasyTuber's own rig motion around the joint the avatar gives the part: rot (degrees),
-            ox / oy (rig units) are added, sx / sy multiply. Children always follow. */
+            ox / oy (rig units) are added, sx / sy multiply. Children always follow.
+
+   Groups (groups[]: { id: 'g_…', name, members: [part or group ids], pivot: { x, y } }) move their
+   members together, like a group in Flash: free motion only (x, y, angle, size, opacity), kept in
+   tracks[groupId], around the middle of the group's parts moved by pivot (stage pixels). A part or
+   group is in at most one group; a group inside another goes with it.
+
+   Frames: the timeline is a grid of frames at fps frames a second. Times stay in ms (the exported
+   file and EasyTuber run in ms); frame f is at round(f * 1000 / fps) ms, frame 0 at 0 ms and the
+   last frame at the end (duration). The timeline shows frames 1-based, as Flash does. */
 (function (root, factory) {
   const lib = factory(typeof module === 'object' && module.exports ? require('./interp') : root.Studio.Interp);
   if (typeof module === 'object' && module.exports) module.exports = lib;
@@ -17,6 +26,10 @@
   const FORMAT = 'easytuber-action-studio';
   const ID = /^[\w-]{1,40}$/;
   const PART_ID = /^([a-zA-Z]{1,20}|c_[a-z0-9]{1,16})$/;
+  const GROUP_ID = /^g_[a-z0-9]{1,16}$/;
+  const MAX_GROUPS = 40;
+  const FPS_OPTIONS = [8, 12, 15, 24, 25, 30, 50, 60];
+  const DEFAULT_FPS = 24;
   const FREE_PROPS = ['x', 'y', 'angle', 'size', 'opacity'];
   const JOINT_PROPS = ['rot', 'ox', 'oy', 'sx', 'sy'];
   const PROPS = [...FREE_PROPS, ...JOINT_PROPS];
@@ -43,13 +56,14 @@
     return {
       format: FORMAT, version: 1,
       id: 'my-action', label: 'My action',
-      duration: 2000, overlap: false,
+      duration: 2000, fps: DEFAULT_FPS, overlap: false,
       hold: false, release: 300, loop: { from: 0, to: 2000 },
       blend: { in: 300, out: 400 },
       strength: { on: true, default: 100, max: 150 },
       tracks: {},
       pivots: {},        // free pivot per part: { u, v } or { joint: true }
       follow: {},        // true: the parts hanging from this one go with its free motion (off by default)
+      groups: [],        // parts moved together: { id, name, members, pivot: { x, y } }
       states: { eyes: [], mouth: [], expression: [] },
       inFront: [],
       sounds: [],
@@ -79,6 +93,51 @@
     return out.filter((k, i) => i === 0 || k.t !== out[i - 1].t);   // one key per time
   }
 
+  /* Groups from a file: valid ids, each part or group in one group at most, no group inside itself,
+     no empty groups. */
+  function cleanGroups(list) {
+    const groups = [], seen = new Set();
+    for (const g of Array.isArray(list) ? list : []) {
+      if (!g || !GROUP_ID.test(g.id) || seen.has(g.id) || groups.length >= MAX_GROUPS) continue;
+      seen.add(g.id);
+      const pv = g.pivot || {};
+      groups.push({
+        id: g.id, name: str(g.name, 40).trim() || g.id,
+        members: Array.isArray(g.members) ? g.members.filter((m) => typeof m === 'string') : [],
+        pivot: { x: round(clamp(num(pv.x, 0), -5000, 5000), 10), y: round(clamp(num(pv.y, 0), -5000, 5000), 10) },
+      });
+    }
+    const ids = new Set(groups.map((g) => g.id)), owner = {};
+    for (const g of groups) {
+      g.members = g.members.filter((m) => {
+        if (m === g.id || owner[m] || !(PART_ID.test(m) || ids.has(m))) return false;
+        owner[m] = g.id;
+        return true;
+      });
+    }
+    // a group inside itself (through other groups) is taken out of the group that closes the loop
+    for (const g of groups) {
+      const path = new Set([g.id]);
+      for (let up = owner[g.id]; up; up = owner[up]) {
+        if (path.has(up)) { const o = groups.find((x) => x.id === owner[g.id]); o.members = o.members.filter((m) => m !== g.id); delete owner[g.id]; break; }
+        path.add(up);
+      }
+    }
+    // empty groups go, and with them their place in the group above
+    let out = groups;
+    for (let changed = true; changed;) {
+      changed = false;
+      const keep = new Set(out.filter((g) => g.members.length).map((g) => g.id));
+      for (const g of out) {
+        const before = g.members.length;
+        g.members = g.members.filter((m) => !GROUP_ID.test(m) || keep.has(m));
+        if (g.members.length !== before) changed = true;
+      }
+      if (out.some((g) => !g.members.length)) { out = out.filter((g) => g.members.length); changed = true; }
+    }
+    return out;
+  }
+
   /* Fill in and check anything loaded from a file. Unknown fields are dropped. */
   function normalize(p) {
     const d = newProject();
@@ -88,6 +147,7 @@
     out.label = str(p.label, 60).trim() || out.id;
     out.hold = p.hold === true;
     out.duration = clamp(Math.round(num(p.duration, d.duration)), MIN_MS, MAX_MS);
+    out.fps = FPS_OPTIONS.includes(+p.fps) ? +p.fps : DEFAULT_FPS;
     out.overlap = !out.hold && p.overlap === true;
     out.release = clamp(Math.round(num(p.release, d.release)), 0, MAX_RELEASE);
     const lp = p.loop || {};
@@ -98,11 +158,14 @@
     const s = p.strength || {};
     const max = clamp(Math.round(num(s.max, 150)), 100, 300);
     out.strength = { on: s.on !== false, max, default: clamp(Math.round(num(s.default, 100)), 0, max) };
+    out.groups = cleanGroups(p.groups);
+    const groupIds = new Set(out.groups.map((g) => g.id));
     out.tracks = {};
     for (const [part, props] of Object.entries(p.tracks && typeof p.tracks === 'object' ? p.tracks : {})) {
-      if (!PART_ID.test(part) || !props || typeof props !== 'object') continue;
+      const group = groupIds.has(part);
+      if (!(PART_ID.test(part) || group) || !props || typeof props !== 'object') continue;
       const tr = {};
-      for (const prop of PROPS) {
+      for (const prop of group ? FREE_PROPS : PROPS) {
         const keys = cleanKeys(props[prop], out.duration);
         if (keys.length) tr[prop] = keys;
       }
@@ -221,6 +284,178 @@
     return [...s].sort((a, b) => a - b);
   }
 
+  /* ---------- frames ---------- */
+  const toFrame = (p, t) => Math.round((t * p.fps) / 1000);
+  const toMs = (p, f) => Math.round((f * 1000) / p.fps);
+  const snapMs = (p, t) => toMs(p, toFrame(p, t));
+  // the number of frames on the timeline: frame 0 at 0 ms to the last frame at the end
+  const frameCount = (p) => toFrame(p, p.duration) + 1;
+  // the length (ms) for a number of frames
+  const framesToDuration = (p, n) => clamp(toMs(p, Math.max(1, Math.round(n)) - 1), MIN_MS, MAX_MS);
+  const minFrames = (p) => Math.ceil((MIN_MS * p.fps) / 1000) + 1;
+
+  /* Put every time in the project on a frame (after the frame rate changed). Two keys landing on
+     one frame: the later one is kept. */
+  function snapToFrames(p) {
+    p.duration = snapMs(p, p.duration);
+    if (p.duration < MIN_MS) p.duration = toMs(p, minFrames(p) - 1);
+    if (p.duration > MAX_MS) p.duration = toMs(p, Math.floor((MAX_MS * p.fps) / 1000));
+    const fix = (t) => clamp(snapMs(p, t), 0, p.duration);
+    const dedupe = (keys) => keys.filter((k, i, a) => i === a.length - 1 || k.t !== a[i + 1].t);
+    for (const tr of Object.values(p.tracks)) for (const prop of Object.keys(tr)) { tr[prop].forEach((k) => { k.t = fix(k.t); }); tr[prop] = dedupe(tr[prop]); }
+    for (const n of STATE_TRACKS) { p.states[n].forEach((k) => { k.t = fix(k.t); }); p.states[n] = dedupe(p.states[n]); }
+    for (const r of [...p.inFront, ...p.effects]) { r.from = fix(r.from); r.to = fix(r.to); if (r.to <= r.from) r.to = Math.min(p.duration, r.from + toMs(p, 1)); }
+    for (const s of p.sounds) s.t = fix(s.t);
+    p.loop = { from: fix(p.loop.from), to: fix(p.loop.to) };
+    if (p.loop.to - p.loop.from < 50) p.loop = { from: 0, to: p.duration };
+  }
+
+  /* A new frame rate. Like Flash, the frames stay where they are and the action plays faster or
+     slower; keepTiming (Flash's "scale spans" turned the other way) keeps every time in ms instead. */
+  function setFps(p, fps, keepTiming = false) {
+    fps = +fps;
+    if (!FPS_OPTIONS.includes(fps) || fps === p.fps) return;
+    if (!keepTiming) setDuration(p, ((frameCount(p) - 1) * 1000) / fps, true);
+    p.fps = fps;
+    snapToFrames(p);
+  }
+
+  /* ---------- rows: what timeline commands work on ----------
+     A row id is a part or group id (all of its tracks), 'id|prop' (one track), 'state:eyes' (a face
+     track), 'sounds', 'front' (parts in front) or 'fx:<effect id>'. keys(list, isState) returns the
+     new list; span(bar) and point(sound) change it in place, or return false to remove it. */
+  function forRows(p, rows, { keys, span, point }) {
+    const done = new Set();
+    for (const r of rows) {
+      if (r.startsWith('state:')) { const n = r.slice(6); if (p.states[n] && keys) p.states[n] = keys(p.states[n], true); continue; }
+      if (r === 'sounds') { if (point) p.sounds = p.sounds.filter((x) => point(x) !== false); continue; }
+      if (r === 'front') { if (span) p.inFront = p.inFront.filter((b) => span(b) !== false); continue; }
+      if (r.startsWith('fx:')) { if (span) p.effects = p.effects.filter((e) => e.id !== r.slice(3) || span(e) !== false); continue; }
+      const [id, prop] = r.split('|'), tr = p.tracks[id];
+      if (!tr || !keys) continue;
+      for (const pr of prop ? [prop] : Object.keys(tr)) {
+        if (!tr[pr] || done.has(id + '|' + pr)) continue;
+        done.add(id + '|' + pr);
+        tr[pr] = keys(tr[pr], false);
+        if (!tr[pr].length) delete tr[pr];
+      }
+      if (!Object.keys(tr).length) delete p.tracks[id];
+    }
+  }
+  // every row of the project (for commands on the whole timeline)
+  function allRows(p) {
+    return [...Object.keys(p.tracks), ...STATE_TRACKS.map((n) => 'state:' + n), 'sounds', 'front', ...p.effects.map((e) => 'fx:' + e.id)];
+  }
+  const oneAFrame = (keys) => keys.sort((a, b) => a.t - b.t).filter((k, i, a) => i === a.length - 1 || k.t !== a[i + 1].t);
+
+  /* F5: n frames inserted after frame f on these rows: what comes later moves right, a span running
+     through f gets longer, and the action gets n frames longer. */
+  function insertFrames(p, rows, f, n) {
+    if (n <= 0) return;
+    const old = p.duration;
+    p.duration = framesToDuration(p, frameCount(p) + n);
+    if (p.loop.to === old) p.loop.to = p.duration;
+    const at = (t) => { const k = toFrame(p, t); return k > f ? Math.min(p.duration, toMs(p, k + n)) : t; };
+    forRows(p, rows, {
+      keys: (list) => oneAFrame(list.map((k) => ({ ...k, t: at(k.t) }))),
+      span: (b) => { b.from = at(b.from); b.to = at(b.to); },
+      point: (x) => { x.t = at(x.t); },
+    });
+  }
+
+  /* Shift+F5: frames f0..f1 taken out of these rows: their keys go and what comes later moves left.
+     shorten: the action gets that many frames shorter too (every row was picked). */
+  function removeFrames(p, rows, f0, f1, shorten = false) {
+    const n = f1 - f0 + 1;
+    if (n <= 0) return;
+    const map = (t) => { const k = toFrame(p, t); return k < f0 ? t : k > f1 ? toMs(p, k - n) : null; };
+    forRows(p, rows, {
+      keys: (list) => list.filter((k) => map(k.t) !== null).map((k) => ({ ...k, t: map(k.t) })),
+      span: (b) => {
+        const a = map(b.from) ?? toMs(p, f0), z = map(b.to) ?? toMs(p, Math.max(0, f0 - 1));
+        if (z <= a) return false;
+        b.from = a; b.to = z;
+        return true;
+      },
+      point: (x) => { const t = map(x.t); if (t === null) return false; x.t = t; return true; },
+    });
+    if (shorten) {
+      const was = p.duration;
+      p.duration = framesToDuration(p, Math.max(minFrames(p), frameCount(p) - n));
+      if (p.loop.to === was || p.loop.to > p.duration) p.loop.to = p.duration;
+      if (p.loop.to - p.loop.from < 50) p.loop = { from: 0, to: p.duration };
+    }
+  }
+
+  /* Reverse Frames: the keys from frame f0 to f1 in the opposite order; each way between two keys
+     keeps its ease, turned round (in becomes out). */
+  const FLIP = { inQuad: 'outQuad', outQuad: 'inQuad' };
+  function reverseFrames(p, rows, f0, f1) {
+    const t0 = toMs(p, f0), t1 = toMs(p, f1);
+    forRows(p, rows, {
+      keys: (list, state) => {
+        const inside = list.filter((k) => k.t >= t0 && k.t <= t1);
+        if (inside.length < 2 && !state) return list;
+        const rest = list.filter((k) => k.t < t0 || k.t > t1);
+        const flipped = inside.map((k, i) => {
+          const out = { ...k, t: toMs(p, f0 + f1 - toFrame(p, k.t)) };
+          if (!state) {
+            // the way into this key (from the one before it) is the way out of it now
+            const before = inside[i - 1];
+            out.ease = before ? FLIP[before.ease] || before.ease : k.ease;
+          }
+          return out;
+        });
+        return oneAFrame([...rest, ...flipped]);
+      },
+    });
+  }
+
+  /* ---------- groups ---------- */
+  const isGroup = (id) => GROUP_ID.test(id);
+  const groupById = (p, id) => p.groups.find((g) => g.id === id) || null;
+  // the group a part or group is in, or null
+  function groupOf(p, id) { const g = p.groups.find((x) => x.members.includes(id)); return g ? g.id : null; }
+  // the groups around a part or group, innermost first
+  function groupChain(p, id) { const out = []; for (let g = groupOf(p, id); g && !out.includes(g); g = groupOf(p, g)) out.push(g); return out; }
+  // every part in a group, through the groups inside it
+  function groupParts(p, gid, seen = new Set()) {
+    const g = groupById(p, gid);
+    if (!g || seen.has(gid)) return [];
+    seen.add(gid);
+    return g.members.flatMap((m) => (isGroup(m) ? groupParts(p, m, seen) : [m]));
+  }
+
+  /* Ctrl+G: the ids (parts and groups) become a new group. It goes inside the group they were all in
+     (if they shared one). Returns the new group's id. */
+  function makeGroup(p, ids, name) {
+    ids = [...new Set(ids)].filter((id) => PART_ID.test(id) || groupById(p, id));
+    if (!ids.length || p.groups.length >= MAX_GROUPS) return null;
+    const ups = new Set(ids.map((id) => groupOf(p, id)));
+    const up = ups.size === 1 ? [...ups][0] : null;
+    for (const g of p.groups) g.members = g.members.filter((m) => !ids.includes(m));
+    let n = 1;
+    while (groupById(p, 'g_' + n)) n++;
+    const id = 'g_' + n;
+    p.groups.push({ id, name: name || `Group ${n}`, members: ids, pivot: { x: 0, y: 0 } });
+    if (up && groupById(p, up)) groupById(p, up).members.push(id);
+    p.groups = cleanGroups(p.groups);
+    for (const gid of Object.keys(p.tracks)) if (isGroup(gid) && !groupById(p, gid)) delete p.tracks[gid];
+    return id;
+  }
+
+  /* Ctrl+Shift+G: the group goes; its members move up into the group it was in. The group's own
+     motion goes with it. */
+  function ungroup(p, gid) {
+    const g = groupById(p, gid);
+    if (!g) return;
+    const up = groupOf(p, gid);
+    p.groups = p.groups.filter((x) => x.id !== gid);
+    if (up) { const u = groupById(p, up); u.members.splice(u.members.indexOf(gid), 1, ...g.members); }
+    delete p.tracks[gid];
+    p.groups = cleanGroups(p.groups);
+  }
+
   /* Copy one side's arm keys to the other: rot and ox flip sign so the motion mirrors. */
   function mirror(p, mirrorMap, fromLeft) {
     for (const [a, b] of Object.entries(mirrorMap)) {
@@ -267,7 +502,11 @@
   }
 
   return {
-    FORMAT, ID, PART_ID, FILE, PROPS, FREE_PROPS, JOINT_PROPS, REST, PROP_LABEL, PERCENT, UNIT, STATE_TRACKS, STATE_VALUES, MIN_MS, MAX_MS, MAX_RELEASE, MEDIA_PREFIXES,
+    FORMAT, ID, PART_ID, GROUP_ID, FILE, PROPS, FREE_PROPS, JOINT_PROPS, REST, PROP_LABEL, PERCENT, UNIT, STATE_TRACKS, STATE_VALUES, MIN_MS, MAX_MS, MAX_RELEASE, MEDIA_PREFIXES,
+    FPS_OPTIONS, DEFAULT_FPS,
     newProject, normalize, track, valueAt, setKey, removeKey, moveKey, setStateKey, stateAt, keyTimes, mirror, setDuration, uniqueId,
+    toFrame, toMs, snapMs, frameCount, framesToDuration, minFrames, snapToFrames, setFps,
+    forRows, allRows, insertFrames, removeFrames, reverseFrames,
+    isGroup, groupById, groupOf, groupChain, groupParts, makeGroup, ungroup,
   };
 });

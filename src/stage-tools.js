@@ -9,7 +9,12 @@
    The tool (R / M / S) says what a drag does: Rotate, Move or Scale. Shift moves and Alt scales,
    whatever the tool. Ctrl+click adds a part to the selection or takes it out; drag on empty stage to
    box-select. With several parts selected a drag changes them all; a part carried by a selected
-   parent is left to its parent, so nothing moves twice. Wheel zooms, middle-drag pans. */
+   parent is left to its parent, so nothing moves twice. Wheel zooms, middle-drag pans.
+
+   Groups work as in Flash: a click on a part in a group picks the whole group (its own pivot, the
+   cyan-boxed crosshair, can be dragged too); double-click it to edit inside it (the bar at the top
+   says where you are; Esc or a double-click on empty stage backs out). Locked layers can't be
+   picked (a click goes through them) and hidden ones aren't drawn. */
 (function (S) {
   const PT = window.PT, M = PT.M;
   const TOOLS = ['rotate', 'move', 'scale'];
@@ -31,6 +36,7 @@
         S.Preview.zoomAt(Math.exp(-e.deltaY * 0.0015), x, y);
       }, { passive: false });
       canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+      canvas.addEventListener('dblclick', (e) => this.dbl(e));
       for (const b of document.querySelectorAll('#stageTools [data-tool]')) b.addEventListener('click', () => this.setTool(b.dataset.tool));
       for (const b of document.querySelectorAll('#stageTools [data-space]')) b.addEventListener('click', () => this.setSpace(b.dataset.space));
       const piv = document.getElementById('optPivots');
@@ -66,10 +72,94 @@
       if (!PT.Actions.hasPartFx) return null;
       try { return PT.Actions.partFx(id); } catch (e) { return null; }
     },
-    // the free motion of the action, as maps of the stage per part (see codegen freeSource)
-    freeMaps() {
+    // the free motion of the action, as maps of the stage per part and group (see codegen freeSource)
+    freeState() {
       const run = PT.Actions.running.find((r) => S.Preview.def && r.def === S.Preview.def);
-      return (run && run.state.free && run.state.free.maps) || {};
+      return (run && run.state.free) || null;
+    },
+    freeMaps() { const st = this.freeState(); return (st && st.maps) || {}; },
+    groupMaps() { const st = this.freeState(); return (st && st.groups) || {}; },
+
+    /* ---------- groups ---------- */
+    // what you can pick at this level: the members of the group being edited, or the top level
+    topLevel() {
+      const p = S.App.project, Mo = S.Model;
+      if (S.App.entered) { const g = Mo.groupById(p, S.App.entered); if (g) return g.members.slice(); }
+      const rig = S.Preview.rig;
+      const parts = PT.PARTS.filter((d) => rig.parts[d.id] && rig.parts[d.id].visible).map((d) => d.id);
+      return [...p.groups.filter((g) => !Mo.groupOf(p, g.id)).map((g) => g.id), ...parts.filter((id) => !Mo.groupOf(p, id))];
+    },
+    // what a click on a part picks: the outermost group it is in, or inside the group being edited the
+    // item of that group it is in; null when that is locked
+    target(part) {
+      if (!part) return null;
+      const chain = [part, ...S.Model.groupChain(S.App.project, part)];   // innermost first
+      const i = S.App.entered ? chain.indexOf(S.App.entered) : -1;
+      const pick = i > 0 ? chain[i - 1] : chain[chain.length - 1];
+      return S.App.layerLocked(pick) ? null : pick;
+    },
+    insideEntered(part) { return !S.App.entered || S.Model.groupChain(S.App.project, part).includes(S.App.entered); },
+    // where a group's pivot is drawn: from the running action, or (no free motion yet) the middle
+    // of its parts as they rest, moved by its pivot
+    groupPivot(gid, pose = S.Preview.lastPose) {
+      const st = this.freeState();
+      if (st && st.pivots && st.pivots[gid]) return M.apply(S.Preview.view(), st.pivots[gid][0], st.pivots[gid][1]);
+      const parts = S.Model.groupParts(S.App.project, gid).filter((id) => PT.PART[id] && pose && pose[id] && this.artBox(id));
+      const g = S.Model.groupById(S.App.project, gid);
+      if (!parts.length || !g) return null;
+      let x = 0, y = 0;
+      for (const id of parts) { const b = this.artBox(id), q = M.apply(pose[id].world, b.x + b.w / 2, b.y + b.h / 2); x += q[0]; y += q[1]; }
+      const k = S.Preview.view()[0];
+      return [x / parts.length + g.pivot.x * k, y / parts.length + g.pivot.y * k];
+    },
+    // the box around everything in a group, as drawn now (canvas pixels): [x0, y0, x1, y1]
+    groupBox(gid, pose = S.Preview.lastPose) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const id of S.Model.groupParts(S.App.project, gid)) {
+        const box = pose && pose[id] && this.artBox(id), fx = this.fxOf(id), part = S.Preview.rig.parts[id];
+        if (!box || !part || !part.visible || (fx && fx.hide) || S.App.layerHidden(id)) continue;
+        const w = this.artMatrix(id, pose);
+        for (const [u, v] of [[box.x, box.y], [box.x + box.w, box.y], [box.x, box.y + box.h], [box.x + box.w, box.y + box.h]]) {
+          const [x, y] = M.apply(w, u, v);
+          x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+        }
+      }
+      return x1 > x0 ? [x0, y0, x1, y1] : null;
+    },
+    // the frame a part's or group's free move is in: [a, b] (turn and size) of the map carrying it
+    frameOf(id, maps = this.freeMaps(), groups = this.groupMaps()) {
+      const p = S.App.project, Mo = S.Model;
+      if (Mo.isGroup(id)) { const up = Mo.groupOf(p, id), m = up && groups[up]; return m ? [m[0], m[1]] : [1, 0]; }
+      const par = PT.PART[id] && PT.PART[id].parent;
+      if (par && p.follow[par] === true && maps[par]) return [maps[par][0], maps[par][1]];
+      const g = Mo.groupOf(p, id), m = g && groups[g];
+      return m ? [m[0], m[1]] : [1, 0];
+    },
+    // the bar at the top of the stage while editing inside a group: Scene ▸ Group 1 ▸ …
+    syncCrumbs() {
+      const box = document.getElementById('crumbs');
+      if (!box) return;
+      const p = S.App.project, e = S.App.entered;
+      const chain = e ? [e, ...S.Model.groupChain(p, e)].reverse() : [];
+      const key = chain.map((g) => g + ':' + (S.Model.groupById(p, g) || {}).name).join('/');
+      if (key === this.crumbKey) return;
+      this.crumbKey = key;
+      box.hidden = !chain.length;
+      box.replaceChildren(
+        PT.el('button', { title: 'Back to the whole avatar (Esc)', onclick: () => S.App.enterGroup(null) }, '◂ Scene'),
+        ...chain.flatMap((g, i) => [PT.el('span', {}, '▸'), PT.el('button', { class: i === chain.length - 1 ? 'cur' : '', onclick: () => S.App.enterGroup(g) }, (S.Model.groupById(p, g) || {}).name || g)]));
+    },
+    // double-click: a group opens for editing inside it; on empty stage, back out one level
+    dbl(e) {
+      if (this.picking) return;
+      const [x, y] = this.px(e), part = this.hit(x, y);
+      if (!part || !this.insideEntered(part)) { if (S.App.entered) S.App.exitGroup(); return; }
+      const pick = this.target(part);
+      if (pick && S.Model.isGroup(pick)) {
+        S.App.enterGroup(pick);
+        const inner = this.target(part);
+        if (inner) S.App.selectPart(inner);
+      }
     },
     // a matrix from the part's image to the canvas as it is drawn: like the renderer, the free
     // motion turns and scales around the drawing's middle and moves in stage units
@@ -91,7 +181,7 @@
       const order = PT.Actions.active ? PT.Actions.drawOrder(rig.order) : rig.order;
       for (let i = order.length - 1; i >= 0; i--) {
         const id = order[i], part = rig.parts[id], def = PT.PART[id];
-        if (!part || !part.visible || !def || !pose[id]) continue;
+        if (!part || !part.visible || !def || !pose[id] || S.App.layerHidden(id) || S.App.layerLocked(id)) continue;
         const fx = this.fxOf(id);
         if (fx && fx.hide) continue;
         const r = PT.Assets.resolve(id, def.states.length > 1 ? (states[id] || def.states[0]) : 'main', usePH, states.expression);
@@ -134,9 +224,10 @@
       }
       return pv || { u: 0.5, v: 0.5 };
     },
-    // the point a drag turns the part around, in the current mode
-    joint(id, pose = S.Preview.lastPose) {
-      if (this.space === 'joint') return this.rigJoint(id, pose);
+    // the point a drag turns the part (or group) around, in the current mode
+    joint(id, pose = S.Preview.lastPose, space = this.space) {
+      if (S.Model.isGroup(id)) return this.groupPivot(id, pose);
+      if (space === 'joint') return this.rigJoint(id, pose);
       const pv = this.freePivot(id);
       return this.artPoint(id, pv.u, pv.v, pose);
     },
@@ -144,9 +235,11 @@
     toStage(pt) { return M.apply(M.inv(S.Preview.view()), pt[0], pt[1]); },
 
     // the selected parts that a turn or move goes on: not those carried by a selected parent
-    roots(ids) {
-      const set = new Set(ids), p = S.App.project, free = this.space === 'free';
+    roots(ids, space = this.space) {
+      const set = new Set(ids), p = S.App.project, free = space === 'free';
       return ids.filter((id) => {
+        if (S.Model.groupChain(p, id).some((g) => set.has(g))) return false;   // carried by a selected group
+        if (S.Model.isGroup(id)) return true;
         for (let a = PT.PART[id] && PT.PART[id].parent; a; a = PT.PART[a] && PT.PART[a].parent) {
           if (free && p.follow[a] !== true) return true;    // free parts move on their own
           if (set.has(a)) return false;
@@ -168,20 +261,24 @@
         return;
       }
       if (e.button !== 0) return;
-      // the pink crosshair of a selected part, in free mode: drag it to move the pivot
-      if (this.space === 'free' && !this.picking) {
+      // the pink crosshair of a selected part (in free mode) or group: drag it to move the pivot
+      if (!this.picking) {
         for (const id of S.App.sel.parts) {
+          const group = S.Model.isGroup(id);
+          if (!group && this.space !== 'free') continue;
           const j = this.joint(id);
           if (j && Math.hypot(x - j[0], y - j[1]) < 11 * dpr) {
             if (S.Preview.playing) S.App.pause();
-            this.drag = { mode: 'pivot', id, x, y, moved: false };
+            const g = group && S.Model.groupById(S.App.project, id);
+            this.drag = { mode: 'pivot', id, x, y, moved: false, gpiv0: g ? { ...g.pivot } : null, s0: this.toStage([x, y]) };
             this.canvas.classList.add('dragging');
             return;
           }
         }
       }
-      const id = this.hit(x, y);
+      const part = this.hit(x, y);
       if (this.picking) {
+        const id = part;
         if (id) {
           const box = this.artBox(id);
           const [ix, iy] = M.apply(M.inv(this.artMatrix(id)), x, y);
@@ -192,6 +289,9 @@
         return;
       }
       const add = e.ctrlKey || e.metaKey;
+      // a click outside the group being edited leaves it (as in Flash)
+      if (part && !this.insideEntered(part)) S.App.entered = null;
+      const id = this.target(part);
       if (!id) {
         // empty stage: drag a box to select the parts inside it (Ctrl adds to the selection)
         this.drag = { mode: 'box', x, y, x1: x, y1: y, add, moved: false };
@@ -203,31 +303,32 @@
       if (S.Preview.playing) S.App.pause();
       const t = S.App.playhead(), p = S.App.project;
       const ids = S.App.selectedParts();
-      const start = {};
+      // groups only move freely: a drag with a group in it is a free one
+      const space = ids.some((pid) => S.Model.isGroup(pid)) ? 'free' : this.space;
+      // where each one is keyed: at the playhead, or (auto keyframe off) on the keyframe before it
+      const times = {}, start = {};
       for (const pid of ids) {
+        times[pid] = S.App.keyTime(pid, t);
         start[pid] = {};
-        for (const prop of S.Model.PROPS) start[pid][prop] = S.Model.valueAt(p, pid, prop, t);
+        for (const prop of S.Model.PROPS) start[pid][prop] = S.Model.valueAt(p, pid, prop, times[pid]);
       }
       const mode = e.altKey ? 'scale' : e.shiftKey ? 'move' : this.tool;
-      const roots = this.roots(ids);
-      // the part that really turns: the grabbed one, or the selected parent that carries it
+      const roots = this.roots(ids, space);
+      // the one that really turns: the grabbed one, or the selected parent or group that carries it
       let anchor = id;
       for (let pa = PT.PART[id] && PT.PART[id].parent; pa; pa = PT.PART[pa] && PT.PART[pa].parent) if (start[pa] && roots.includes(pa)) anchor = pa;
-      const j = this.joint(anchor) || [x, y];
-      // a free move goes in the parent's own frame: undo the parent's free turn and size
-      const maps = this.freeMaps(), frame = {};
-      for (const pid of ids) {
-        const par = PT.PART[pid] && PT.PART[pid].parent;
-        const m = par && p.follow[par] === true ? maps[par] : null;
-        frame[pid] = m ? [m[0], m[1]] : [1, 0];
-      }
+      for (const g of S.Model.groupChain(p, id)) if (start[g] && roots.includes(g)) anchor = g;
+      const j = this.joint(anchor, undefined, space) || [x, y];
+      // a free move goes in the frame of what carries it (its parent, or its group): undo its turn and size
+      const maps = this.freeMaps(), groups = this.groupMaps(), frame = {};
+      for (const pid of ids) frame[pid] = this.frameOf(pid, maps, groups);
       // grabbed right next to the pivot, the angle swings wildly: turn by sideways distance instead
       const near = Math.hypot(x - j[0], y - j[1]) < 18 * dpr;
       const a0 = Math.atan2(y - j[1], x - j[0]);
       // free, several parts: they turn and scale as one group around the grabbed part's pivot
       const pstart = {};
-      if (this.space === 'free') for (const pid of roots) { const q = this.joint(pid); if (q) pstart[pid] = this.toStage(q); }
-      this.drag = { mode, space: this.space, id: anchor, ids, roots, frame, pstart, t, start, x, y, j, near, a0, last: a0, turned: 0, k: S.App.factorAt(t), moved: false, readout: '' };
+      if (space === 'free') for (const pid of roots) { const q = this.joint(pid, undefined, 'free'); if (q) pstart[pid] = this.toStage(q); }
+      this.drag = { mode, space, id: anchor, ids, roots, frame, pstart, t, times, start, x, y, j, near, a0, last: a0, turned: 0, k: S.App.factorAt(t), moved: false, readout: '' };
       this.canvas.classList.add('dragging');
     },
 
@@ -294,7 +395,7 @@
             const lx = (a * sx + b * sy) / n, ly = (-b * sx + a * sy) / n;
             change[pid] = { x: r1(d.start[pid].x + lx / k), y: r1(d.start[pid].y + ly / k) };
           }
-          const at = this.toStage(this.joint(d.id) || [x, y]);
+          const at = this.toStage(this.joint(d.id, undefined, 'free') || [x, y]);
           d.readout = `x ${Math.round(at[0])}  y ${Math.round(at[1])}  on the stage`;
         } else {
           const pose = S.Preview.lastPose;
@@ -324,12 +425,24 @@
         d.readout = `${Math.round(f * 100)}%`;
       }
       S.App.dragMove((p) => {
-        for (const [pid, vals] of Object.entries(change)) for (const [prop, v] of Object.entries(vals)) S.App.keyValue(p, pid, prop, d.t, v);
+        for (const [pid, vals] of Object.entries(change)) for (const [prop, v] of Object.entries(vals)) S.App.keyValue(p, pid, prop, d.times[pid] ?? d.t, v);
       });
     },
 
     // drag the pivot: anywhere, even off the part. Ctrl snaps to the joint, the middle, edges, corners
     movePivot(d, x, y, e) {
+      if (S.Model.isGroup(d.id)) {
+        // the group's pivot is kept as a move (stage pixels) from the middle of its parts, in the frame
+        // of the groups around it; Ctrl puts it back in the middle
+        const s1 = this.toStage([x, y]), dx = s1[0] - d.s0[0], dy = s1[1] - d.s0[1];
+        const [a, b] = this.frameOf(d.id), n = a * a + b * b || 1;
+        let px = d.gpiv0.x + (a * dx + b * dy) / n, py = d.gpiv0.y + (-b * dx + a * dy) / n;
+        if (e.ctrlKey) { px = 0; py = 0; }
+        const r1 = (v) => Math.round(v * 10) / 10;
+        d.readout = e.ctrlKey ? 'group pivot in the middle' : 'group pivot';
+        S.App.dragMove((p) => { const g = S.Model.groupById(p, d.id); if (g) g.pivot = { x: r1(px), y: r1(py) }; });
+        return;
+      }
       const box = this.artBox(d.id);
       if (!box) return;
       const inv = M.inv(this.artMatrix(d.id));
@@ -360,9 +473,9 @@
         if (d.moved) {
           const x0 = Math.min(d.x, d.x1), x1 = Math.max(d.x, d.x1), y0 = Math.min(d.y, d.y1), y1 = Math.max(d.y, d.y1);
           const inside = PT.PARTS.filter((def) => {
-            const part = S.Preview.rig.parts[def.id], c = part && part.visible && this.center(def.id);
+            const part = S.Preview.rig.parts[def.id], c = part && part.visible && !S.App.layerHidden(def.id) && this.insideEntered(def.id) && this.center(def.id);
             return c && c[0] >= x0 && c[0] <= x1 && c[1] >= y0 && c[1] <= y1;
-          }).map((def) => def.id);
+          }).map((def) => this.target(def.id)).filter(Boolean);
           S.App.selectParts(d.add ? [...S.App.sel.parts, ...inside] : inside);
         } else if (!d.add) S.App.selectPart(null);
       } else if (d.moved) S.App.dragEnd();
@@ -379,6 +492,16 @@
       const pts = [[box.x, box.y], [box.x + box.w, box.y], [box.x + box.w, box.y + box.h], [box.x, box.y + box.h]].map(([u, v]) => M.apply(w, u, v));
       ctx.strokeStyle = style; ctx.lineWidth = width; ctx.setLineDash(dash || []);
       ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.closePath(); ctx.stroke();
+      ctx.setLineDash([]);
+    },
+
+    // a group's box, as Flash draws a selected group
+    groupRect(ctx, gid, pose, style, width, dash) {
+      const b = this.groupBox(gid, pose);
+      if (!b) return;
+      const pad = 4 * (S.Preview.renderer.dpr || 1);
+      ctx.strokeStyle = style; ctx.lineWidth = width; ctx.setLineDash(dash || []);
+      ctx.strokeRect(b[0] - pad + 0.5, b[1] - pad + 0.5, b[2] - b[0] + pad * 2, b[3] - b[1] + pad * 2);
       ctx.setLineDash([]);
     },
 
@@ -427,7 +550,7 @@
       if (this.showPivots) {
         for (const def of PT.PARTS) {
           const part = rig.parts[def.id];
-          if (!part || !part.visible || sel.parts.has(def.id)) continue;
+          if (!part || !part.visible || sel.parts.has(def.id) || S.App.layerHidden(def.id)) continue;
           const j = this.joint(def.id, pose);
           if (!j) continue;
           ctx.fillStyle = S.App.project.tracks[def.id] ? 'rgba(255,209,102,.9)' : 'rgba(255,255,255,.45)';
@@ -435,21 +558,31 @@
           ctx.beginPath(); ctx.arc(j[0], j[1], 3 * dpr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
         }
       }
-      if (this.hover && !d && !sel.parts.has(this.hover)) this.outline(ctx, pose, this.hover, 'rgba(255,255,255,.7)', dpr, [3 * dpr, 3 * dpr]);
-      for (const id of sel.parts) this.outline(ctx, pose, id, id === sel.part ? '#ff7ac8' : 'rgba(255,122,200,.6)', (id === sel.part ? 1.5 : 1) * dpr, [5 * dpr, 4 * dpr]);
+      this.syncCrumbs();
+      // the group being edited inside: a faint box round it
+      if (S.App.entered) this.groupRect(ctx, S.App.entered, pose, 'rgba(79,195,255,.35)', dpr, [2 * dpr, 4 * dpr]);
+      const hoverPick = this.hover && !d ? this.target(this.hover) : null;
+      if (hoverPick && !sel.parts.has(hoverPick)) {
+        if (S.Model.isGroup(hoverPick)) this.groupRect(ctx, hoverPick, pose, 'rgba(79,195,255,.75)', dpr, [3 * dpr, 3 * dpr]);
+        else this.outline(ctx, pose, hoverPick, 'rgba(255,255,255,.7)', dpr, [3 * dpr, 3 * dpr]);
+      }
+      for (const id of sel.parts) {
+        if (S.Model.isGroup(id)) this.groupRect(ctx, id, pose, '#4fc3ff', (id === sel.part ? 1.6 : 1.1) * dpr, null);
+        else this.outline(ctx, pose, id, id === sel.part ? '#ff7ac8' : 'rgba(255,122,200,.6)', (id === sel.part ? 1.5 : 1) * dpr, [5 * dpr, 4 * dpr]);
+      }
       const turning = d && d.roots ? new Set(mode === 'scale' && d.space === 'joint' ? d.ids : d.roots) : null;
       for (const id of sel.parts) {
         const j = this.joint(id, pose);
         if (!j || (turning && !turning.has(id))) continue;   // carried by its parent in this drag
-        this.pivotMark(ctx, j, dpr, mode, id === sel.part, free);
+        this.pivotMark(ctx, j, dpr, mode, id === sel.part, free || S.Model.isGroup(id));
       }
       if (sel.part && !d) {
-        const j = this.joint(sel.part, pose);
-        if (j) this.label(ctx, free ? 'pivot · drag to move' : 'joint', j[0] + 16 * dpr, j[1] + 6 * dpr, dpr, '#ff7ac8');
+        const j = this.joint(sel.part, pose), group = S.Model.isGroup(sel.part);
+        if (j) this.label(ctx, group ? 'group pivot · drag to move · double-click to edit inside' : free ? 'pivot · drag to move' : 'joint', j[0] + 16 * dpr, j[1] + 6 * dpr, dpr, group ? '#4fc3ff' : '#ff7ac8');
       }
-      if (this.pointer && !d && this.hover) {
-        const def = PT.PART[this.hover];
-        this.label(ctx, def ? PT.partName(def) : this.hover, this.pointer[0] + 16 * dpr, this.pointer[1] + 14 * dpr, dpr);
+      if (this.pointer && !d && hoverPick) {
+        const def = PT.PART[hoverPick], g = S.Model.groupById(S.App.project, hoverPick);
+        this.label(ctx, g ? `${g.name} (group)` : def ? PT.partName(def) : hoverPick, this.pointer[0] + 16 * dpr, this.pointer[1] + 14 * dpr, dpr);
       }
       if (d && d.moved && d.readout && this.pointer) this.label(ctx, d.readout, this.pointer[0] + 16 * dpr, this.pointer[1] + 14 * dpr, dpr, '#ffd166');
       if (d && d.mode === 'box' && d.moved) {

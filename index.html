@@ -28,7 +28,8 @@
       <div class="group fields">
         <label title="The action's file name and Streamer.bot id: letters, digits, - or _">Id <input id="fId" spellcheck="false" maxlength="40"></label>
         <label title="Shown in EasyTuber's Actions tab">Name <input id="fLabel" maxlength="60"></label>
-        <label title="Length of the timeline in ms (100 to 60000)">Length <input id="fDuration" type="number" min="100" max="60000" step="100"> ms</label>
+        <label title="Length of the timeline in frames (F5 past the end on the timeline makes it longer too)">Length <input id="fDuration" type="number" min="2" step="1"> frames <span id="fSeconds" class="dimval"></span></label>
+        <label title="Frame rate: frames a second. Changing it keeps the keys on their frames, as in Flash (Action card: keep the timing instead)"><select id="fFps"><option value="8">8</option><option value="12">12</option><option value="15">15</option><option value="24">24</option><option value="25">25</option><option value="30">30</option><option value="50">50</option><option value="60">60</option></select> fps</label>
         <label class="check" title="A held action stays on until it is turned off"><input type="checkbox" id="fHold"> Held</label>
       </div>
       <div class="group right">
@@ -57,7 +58,8 @@
         <button data-tool="scale" title="Scale (S): drag up to grow, down to shrink. Alt+drag also scales.">⤢ Scale <kbd>S</kbd></button>
         <label class="check" title="Show every part's pivot (the point it turns around)"><input type="checkbox" id="optPivots" checked> Pivots</label>
       </div>
-      <div id="stageHint">Click a part to select it · drag the pink pivot to move it (Ctrl snaps) · Ctrl+click or drag a box for several · Shift+drag: move · Alt+drag: scale · wheel: zoom · middle-drag: pan</div>
+      <div id="crumbs" hidden></div>
+      <div id="stageHint">Click a part to select it · drag the pink pivot to move it (Ctrl snaps) · Ctrl+click or drag a box for several · Ctrl+G: group · double-click a group to edit inside · Shift+drag: move · Alt+drag: scale · wheel: zoom · middle-drag: pan</div>
       <div id="pickBanner" hidden><span>Click the avatar where the effect should be</span> <button id="btnPickCancel">Cancel</button></div>
       <div id="defError" hidden></div>
     </main>
@@ -80,10 +82,12 @@
 
     <section id="transport">
       <button id="btnStart" title="Go to the start (Home)">⏮</button>
-      <button id="btnPrevKey" title="Previous key (,)">◂◆</button>
-      <button id="btnPlay" class="primary play" title="Play / pause (Space)">▶</button>
-      <button id="btnNextKey" title="Next key (.)">◆▸</button>
-      <span id="timeReadout">0 ms</span>
+      <button id="btnPrevKey" title="Previous keyframe (Shift+,)">◂◆</button>
+      <button id="btnPrevFrame" title="Previous frame (,)">◂|</button>
+      <button id="btnPlay" class="primary play" title="Play / stop (Enter or Space)">▶</button>
+      <button id="btnNextFrame" title="Next frame (.)">|▸</button>
+      <button id="btnNextKey" title="Next keyframe (Shift+.)">◆▸</button>
+      <span id="timeReadout">frame 1</span>
       <label class="check" id="loopWrap"><input type="checkbox" id="optLoop" checked> Loop</label>
       <select id="optSpeed" title="Playback speed">
         <option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option>

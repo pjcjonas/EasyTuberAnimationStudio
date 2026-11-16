@@ -1,5 +1,6 @@
-/* The Inspector: what is selected (a part, keys, a face key, a sound, an effect, a parts-in-front
-   bar), quick face keys at the playhead, adding things, and the action's own settings.
+/* The Inspector: what is selected (a part, a group, keys, a face key, a sound, an effect, a
+   parts-in-front bar), quick face keys at the playhead, adding things, and the action's own settings.
+   Times are shown as frame numbers (1 = the first frame), like the timeline.
 
    Fields are bound to getters: sync() refreshes their values (the playhead moved, an undo) without
    rebuilding, so a slider being dragged keeps working. render() rebuilds when the selection or the
@@ -50,6 +51,11 @@
       this.bind(out, () => fmt(get()));
       return [this.bind(i, get), out];
     },
+    // a time (ms) shown and typed as its frame number, 1-based
+    frame(getMs, setMs) {
+      const P = () => S.App.project;
+      return this.num(() => S.Model.toFrame(P(), getMs()) + 1, (v) => setMs(S.Model.toMs(P(), Math.max(0, Math.min(S.Model.frameCount(P()) - 1, Math.round(v) - 1)))), { step: 1, min: 1 });
+    },
     check(get, set, text = '') {
       const i = el('input', { type: 'checkbox' });
       i.checked = !!get();
@@ -88,8 +94,10 @@
       const sel = S.App.sel;
       if (sel.item) cards.push(this.itemCard(sel.item));
       if (sel.keys.size) cards.push(this.keysCard());
-      if (sel.parts.size) cards.push(this.partCard(S.App.selectedParts()));
-      if (!sel.item && !sel.parts.size && !sel.keys.size) cards.push(el('div', { class: 'empty-sel' }, 'Click a part on the stage or in the timeline to pose it. Drag it to set a key at the playhead. Ctrl+click or drag a box on the stage to pose several parts at once.'));
+      const nodes = S.App.selectedParts();
+      if (nodes.length === 1 && S.Model.isGroup(nodes[0])) cards.push(this.groupCard(nodes[0]));
+      else if (nodes.length) cards.push(this.partCard(nodes));
+      if (!sel.item && !sel.parts.size && !sel.keys.size) cards.push(el('div', { class: 'empty-sel' }, 'Click a part on the stage or a layer in the timeline to pose it. Drag it to set a key at the playhead. Ctrl+click or drag a box on the stage to pose several parts at once; Ctrl+G groups them.'));
       cards.push(this.faceCard(), this.addCard(), this.actionCard(), this.previewCard());
       this.root.replaceChildren(...cards.filter(Boolean));
       this.root.scrollTop = top;
@@ -121,7 +129,7 @@
         this.edit((q) => {
           for (const id of ids) {
             if (on) S.Model.removeKey(q, id, prop, t());
-            else if (!S.Model.track(q, id, prop).some((k) => k.t === t())) S.App.keyValue(q, id, prop, t(), S.Model.valueAt(q, id, prop, t()));
+            else if (!S.Model.track(q, id, prop).some((k) => k.t === t())) S.App.keyValue(q, id, prop, t(), S.Model.valueAt(q, id, prop, t()));   // the key button always keys the playhead
           }
         });
       });
@@ -132,6 +140,17 @@
     partCard(ids) {
       const t = () => Math.round(S.App.playhead());
       const many = ids.length > 1;
+      const withGroups = ids.some((x) => S.Model.isGroup(x));
+      const nameOf = (x) => (S.Model.isGroup(x) ? (S.Model.groupById(S.App.project, x) || {}).name || x : PT.PART[x] ? PT.partName(PT.PART[x]) : x);
+      if (withGroups) {
+        // parts and groups together: what they share is free motion
+        return this.card([`${ids.length} layers`, el('span', { class: 'grow' }), el('span', { class: 'val' }, '@ playhead')],
+          el('p', { class: 'note' }, ids.map(nameOf).join(', ') + '. A value typed here goes on all of them.'),
+          ...S.Model.FREE_PROPS.map((prop) => this.propRow(ids, prop, t)),
+          el('div', { class: 'row' },
+            el('button', { onclick: () => S.App.keyParts(ids), title: 'K' }, '◆ Key all'),
+            el('button', { onclick: () => S.App.groupSelection(), title: 'Ctrl+G' }, 'Group them')));
+      }
       const id = ids[0], def = PT.PART[id], mirror = !many && PT.MIRROR[id];
       const title = many ? `${ids.length} parts` : def ? PT.partName(def) : id;
       const free = S.Tools.space === 'free';
@@ -162,8 +181,10 @@
       const jointRows = S.Model.JOINT_PROPS.map((prop) => this.propRow(ids, prop, t));
       const hasJoint = ids.some((x) => S.Model.JOINT_PROPS.some((prop) => S.Model.track(S.App.project, x, prop).length));
 
+      const inGroup = !many && S.Model.groupOf(S.App.project, id);
       return this.card([title, el('span', { class: 'grow' }), el('span', { class: 'val' }, '@ playhead')],
-        many ? el('p', { class: 'note' }, ids.map((x) => (PT.PART[x] ? PT.partName(PT.PART[x]) : x)).join(', ') + '. A value typed here goes on all of them; a drag on the stage changes them all by the same amount.') : null,
+        many ? el('p', { class: 'note' }, ids.map((x) => (PT.PART[x] ? PT.partName(PT.PART[x]) : x)).join(', ') + '. A value typed here goes on all of them; a drag on the stage changes them all by the same amount. Ctrl+G groups them.') : null,
+        inGroup ? el('p', { class: 'note' }, `In ${S.Model.groupById(S.App.project, inGroup).name}: its own motion goes inside the group's.`) : null,
         el('h5', {}, 'Free: anywhere on the stage', el('span', { class: 'grow' }), free ? el('span', { class: 'val' }, 'drag mode') : null),
         where,
         ...freeRows,
@@ -179,6 +200,34 @@
           mirror ? el('button', { onclick: () => S.App.edit((q) => S.Model.mirror(q, { [id]: mirror }, id.startsWith('armL'))), title: `Copy this part's keys to ${PT.partName(PT.PART[mirror])}, mirrored` }, '⇄ Mirror to other arm') : null,
           mirror ? el('button', { onclick: () => S.App.edit((q) => S.Model.mirror(q, PT.MIRROR, id.startsWith('armL'))), title: 'Copy both parts of this arm to the other arm, mirrored' }, '⇄ Whole arm') : null,
           el('button', { class: 'danger', onclick: () => S.App.edit((q) => { for (const x of ids) { delete q.tracks[x]; delete q.pivots[x]; delete q.follow[x]; } }) }, 'Clear')));
+    },
+
+    /* A group: its name, what is in it, its free motion (keyed like a part's) and its pivot */
+    groupCard(gid) {
+      const p = S.App.project, g = S.Model.groupById(p, gid);
+      if (!g) return null;
+      const t = () => Math.round(S.App.playhead());
+      const ids = [gid];
+      const gp = () => S.Model.groupById(S.App.project, gid) || { pivot: { x: 0, y: 0 }, name: '' };
+      const nameOf = (x) => (S.Model.isGroup(x) ? (S.Model.groupById(p, x) || {}).name || x : PT.PART[x] ? PT.partName(PT.PART[x]) : `${x} (not in this avatar)`);
+      const up = S.Model.groupOf(p, gid);
+      return this.card([g.name, el('span', { class: 'grow' }), el('span', { class: 'val' }, 'group')],
+        this.f('Name', this.text(() => gp().name, (v) => this.edit((q) => { const x = S.Model.groupById(q, gid); if (x) x.name = v.slice(0, 40) || gid; }, 'gname' + gid))),
+        el('div', { class: 'chips' }, g.members.map((m) => el('label', { class: 'chip-btn', title: 'Select it', onclick: () => { S.App.enterGroup(gid); S.App.selectPart(m); } }, (S.Model.isGroup(m) ? '▣ ' : '') + nameOf(m)))),
+        up ? el('p', { class: 'note' }, `Inside ${S.Model.groupById(p, up).name}.`) : null,
+        el('h5', {}, 'Motion of the whole group', el('span', { class: 'grow' }), el('span', { class: 'val' }, 'free')),
+        ...S.Model.FREE_PROPS.map((prop) => this.propRow(ids, prop, t)),
+        this.f('Pivot', el('span', { style: { display: 'flex', gap: '6px' } },
+          this.num(() => gp().pivot.x, (v) => this.edit((q) => { const x = S.Model.groupById(q, gid); if (x) x.pivot = { ...x.pivot, x: v }; })),
+          this.num(() => gp().pivot.y, (v) => this.edit((q) => { const x = S.Model.groupById(q, gid); if (x) x.pivot = { ...x.pivot, y: v }; }))),
+          el('span', { class: 'val' }, 'px'), 'Stage pixels from the middle of the group\'s parts. Or drag the crosshair on the stage (Ctrl: back to the middle).'),
+        el('p', { class: 'note' }, 'The group turns, sizes and fades around its pivot and carries everything in it; each part\'s own motion goes on inside it. Double-click the group on the stage to edit inside it.'),
+        el('div', { class: 'row' },
+          el('button', { onclick: () => S.App.keyParts(ids), title: 'K / F6' }, '◆ Key'),
+          el('button', { onclick: () => S.App.enterGroup(gid), title: 'Or double-click it on the stage' }, 'Edit inside'),
+          el('button', { onclick: () => S.App.edit((q) => { const x = S.Model.groupById(q, gid); if (x) x.pivot = { x: 0, y: 0 }; }) }, 'Pivot: middle'),
+          el('button', { onclick: () => S.App.ungroupSelection(), title: 'Ctrl+Shift+G' }, 'Ungroup'),
+          el('button', { class: 'danger', title: 'Remove the group\'s own keys', onclick: () => S.App.edit((q) => { delete q.tracks[gid]; }) }, 'Clear')));
     },
 
     keysCard() {
@@ -206,29 +255,31 @@
       }
       if (every.length === 1 && keys.length === 1) {
         const k = keys[0];
-        out.unshift(this.f('Time', this.num(() => k.t, (v) => {
-          S.App.edit((q) => { const to = Math.max(0, Math.min(q.duration, Math.round(v))); S.Model.moveKey(q, k.part, k.prop, k.t, to); S.App.sel.keys = new Set([`${k.part}|${k.prop}|${to}`]); });
-        }, { step: 10 }), el('span', { class: 'val' }, 'ms')));
+        out.unshift(this.f('Frame', this.frame(() => k.t, (to) => {
+          S.App.edit((q) => { S.Model.moveKey(q, k.part, k.prop, k.t, to); S.App.sel.keys = new Set([`${k.part}|${k.prop}|${to}`]); S.App.sel.frames = null; });
+        }), el('span', { class: 'val' }, `${k.t} ms`)));
       } else {
-        // move them all together by a number of ms
-        const by = el('input', { type: 'number', step: 10, value: 100 });
+        // move them all together by a number of frames
+        const by = el('input', { type: 'number', step: 1, value: 1, min: 1 });
         const shift = (dir) => {
-          const dt = dir * (parseFloat(by.value) || 0);
-          if (!dt) return;
+          const df = dir * Math.round(parseFloat(by.value) || 0);
+          if (!df) return;
           let moved = [];
-          S.App.edit((q) => { moved = S.Timeline.moveKeys(q, every, dt); });
+          S.App.edit((q) => { moved = S.Timeline.moveKeysFrames(q, every, df); });
           S.App.sel.keys = new Set(moved.map((k) => `${k.part}|${k.prop}|${k.t}`));
+          const fs = S.App.sel.frames;
+          if (fs) S.App.sel.frames = { ...fs, f0: Math.max(0, fs.f0 + df), f1: Math.max(0, fs.f1 + df) };
           S.App.refresh();
         };
         out.push(this.f('Move by', by, el('span', { style: { display: 'flex', gap: '4px' } },
           el('button', { class: 'small', title: 'Earlier', onclick: () => shift(-1) }, '◂'),
-          el('button', { class: 'small', title: 'Later', onclick: () => shift(1) }, '▸')), 'Move every selected key earlier or later (ms)'));
+          el('button', { class: 'small', title: 'Later', onclick: () => shift(1) }, '▸')), 'Move every selected key earlier or later (frames)'));
       }
       if (keys.length) out.push(this.f('Ease', ease, null, 'How the value moves from this key to the next one'));
       const parts = new Set(keys.map((k) => k.part)), face = every.length - keys.length;
       const on = [parts.size ? `${parts.size} part${parts.size > 1 ? 's' : ''}` : '', face ? `${face} face key${face > 1 ? 's' : ''}` : ''].filter(Boolean).join(' and ');
       return this.card(`${every.length} key${every.length > 1 ? 's' : ''} selected`,
-        every.length > 1 ? el('p', { class: 'note' }, `${on}. Drag any of them in the timeline to move them all. Drag a box over empty timeline to select keys; Shift adds more.`) : null,
+        every.length > 1 ? el('p', { class: 'note' }, `${on}. Drag the selected frames in the timeline to move them all (Alt+drag copies). Right-click them for tweens and eases.`) : null,
         ...out,
         el('div', { class: 'row' }, el('button', { class: 'danger', onclick: () => S.App.deleteSelection() }, 'Delete (Del)')));
     },
@@ -271,8 +322,8 @@
       if (p().hold) {
         rows.push(
           this.f('Release', this.num(() => p().release, (v) => set((q) => { q.release = Math.max(0, Math.min(S.Model.MAX_RELEASE, Math.round(v))); }), { step: 50 }), el('span', { class: 'val' }, 'ms'), 'How long it takes to blend out once it is turned off'),
-          this.f('Loop from', this.num(() => p().loop.from, (v) => set((q) => { const f = Math.max(0, Math.min(q.loop.to - 50, Math.round(v))); q.loop.from = f; }), { step: 50 }), el('span', { class: 'val' }, 'ms')),
-          this.f('Loop to', this.num(() => p().loop.to, (v) => set((q) => { q.loop.to = Math.max(q.loop.from + 50, Math.min(q.duration, Math.round(v))); }), { step: 50 }), el('span', { class: 'val' }, 'ms')));
+          this.f('Loop from', this.frame(() => p().loop.from, (t) => set((q) => { if (q.loop.to - t >= 50) q.loop.from = t; })), el('span', { class: 'val' }, 'frame')),
+          this.f('Loop to', this.frame(() => p().loop.to, (t) => set((q) => { if (t - q.loop.from >= 50) q.loop.to = t; })), el('span', { class: 'val' }, 'frame')));
       } else {
         rows.push(this.f('Overlap', this.check(() => p().overlap, (v) => set((q) => { q.overlap = v; }), 'play copies side by side'), null, 'Playing it again while it runs adds a second copy instead of restarting'));
       }
@@ -286,7 +337,8 @@
       rows.push(
         this.f('Media folder', this.select([['user-actions', 'your actions folder'], ['media/actions', 'built into EasyTuber']], () => p().mediaPrefix, (v) => S.App.edit((q) => { q.mediaPrefix = v; })), null, 'Where the action\'s pictures and sounds will live'),
         this.f('Rest keys', this.check(() => S.App.autoRest, (v) => { S.App.autoRest = v; }, 'auto'), null, 'The first key on a track also adds rest keys at the start (and end), so the part moves from rest and back'),
-        this.f('Length edits', this.check(() => S.App.stretch, (v) => { S.App.stretch = v; }, 'stretch keys'), null, 'Changing the length moves every key in proportion'));
+        this.f('Length edits', this.check(() => S.App.stretch, (v) => { S.App.stretch = v; }, 'stretch keys'), null, 'Changing the length moves every key in proportion'),
+        this.f('Frame rate', this.check(() => S.App.keepTiming, (v) => { S.App.keepTiming = v; }, 'keep the timing'), null, 'Off (as in Flash): a new frame rate keeps every key on its frame, so the action plays faster or slower. On: every key keeps its time and moves to the nearest frame.'));
       return this.card('Action', ...rows);
     },
 
@@ -309,14 +361,14 @@
         if (!k) return null;
         const find = (q) => q.states[item.name].find((x) => x.t === S.App.sel.item.t);
         return this.card(`${item.name} key`,
-          this.f('Time', this.num(() => S.App.sel.item.t, (v) => S.App.edit((q) => {
+          this.f('Frame', this.frame(() => S.App.sel.item.t, (to) => S.App.edit((q) => {
             const key = find(q); if (!key) return;
-            const to = Math.max(0, Math.min(q.duration, Math.round(v)));
             q.states[item.name] = q.states[item.name].filter((x) => x === key || x.t !== to);
             key.t = to; q.states[item.name].sort((a, b) => a.t - b.t);
             S.App.sel.item = { ...item, t: to };
             S.App.sel.keys = new Set([`state:${item.name}|v|${to}`]);
-          }), { step: 10 }), el('span', { class: 'val' }, 'ms')),
+            S.App.sel.frames = null;
+          }))),
           this.f('Shows', this.select(this.stateOptions(item.name), () => (find(S.App.project) || {}).v || '', (v) => this.edit((q) => { const key = find(q); if (key) key.v = v; }))),
           el('p', { class: 'note' }, '"normal" hands the ' + item.name + ' back to EasyTuber (blinking, talking).'),
           el('div', { class: 'row' }, el('button', { class: 'danger', onclick: () => S.App.deleteSelection() }, 'Delete')));
@@ -327,7 +379,7 @@
         const g = (q) => q.sounds[item.i];
         const rows = [
           this.f('File', el('span', { class: 'grow', title: p.assets[s.file] || 'location unknown' }, s.file), el('button', { class: 'small', onclick: () => S.App.replaceSound(item.i) }, 'Replace…')),
-          this.f('Starts at', this.num(() => g(S.App.project).t, (v) => this.edit((q) => { g(q).t = Math.max(0, Math.min(q.duration, Math.round(v))); }), { step: 10 }), el('span', { class: 'val' }, 'ms')),
+          this.f('Starts at', this.frame(() => g(S.App.project).t, (t) => this.edit((q) => { g(q).t = t; })), el('span', { class: 'val' }, 'frame')),
         ];
         const [r, out] = this.range(() => Math.round(g(S.App.project).volume * 100), (v) => this.edit((q) => { g(q).volume = v / 100; }, 'vol' + item.i), { min: 0, max: 100, step: 5, fmt: (v) => v + '%' });
         rows.push(this.f('Volume', r, out));
@@ -348,8 +400,8 @@
         return this.card('Parts in front',
           el('p', { class: 'note' }, 'Drawn on top of the rest, in this order, while the bar is on. Useful when an arm reaches across the face.'),
           chips,
-          this.f('From', this.num(() => g(S.App.project).from, (v) => this.edit((q) => { g(q).from = Math.max(0, Math.min(g(q).to - 20, Math.round(v))); }), { step: 10 }), el('span', { class: 'val' }, 'ms')),
-          this.f('To', this.num(() => g(S.App.project).to, (v) => this.edit((q) => { g(q).to = Math.min(q.duration, Math.max(g(q).from + 20, Math.round(v))); }), { step: 10 }), el('span', { class: 'val' }, 'ms')),
+          this.f('From', this.frame(() => g(S.App.project).from, (t) => this.edit((q) => { g(q).from = Math.min(t, g(q).to - 1); })), el('span', { class: 'val' }, 'frame')),
+          this.f('To', this.frame(() => g(S.App.project).to, (t) => this.edit((q) => { g(q).to = Math.max(t, g(q).from + 1); })), el('span', { class: 'val' }, 'frame')),
           el('div', { class: 'row' }, el('button', { class: 'danger', onclick: () => S.App.deleteSelection() }, 'Delete')));
       }
       if (item.kind === 'effect') return this.effectCard(item.id);
@@ -367,8 +419,8 @@
       const rows = [
         this.f('Name', this.text(() => g(S.App.project).label, (v) => this.edit((q) => { g(q).label = v.slice(0, 40) || id; }, 'label' + id)), null, 'Also the checkbox label in EasyTuber\'s Actions tab'),
         this.f('Layer', this.select([['front', 'in front of the avatar'], ['behind', 'behind the avatar']], () => g(S.App.project).layer, (v) => S.App.edit((q) => { g(q).layer = v; }))),
-        this.f('From', this.num(() => g(S.App.project).from, (v) => this.edit((q) => { g(q).from = Math.max(0, Math.min(g(q).to - 20, Math.round(v))); }), { step: 10 }), el('span', { class: 'val' }, 'ms')),
-        this.f('To', this.num(() => g(S.App.project).to, (v) => this.edit((q) => { g(q).to = Math.min(q.duration, Math.max(g(q).from + 20, Math.round(v))); }), { step: 10 }), el('span', { class: 'val' }, 'ms')),
+        this.f('From', this.frame(() => g(S.App.project).from, (t) => this.edit((q) => { g(q).from = Math.min(t, g(q).to - 1); })), el('span', { class: 'val' }, 'frame')),
+        this.f('To', this.frame(() => g(S.App.project).to, (t) => this.edit((q) => { g(q).to = Math.max(t, g(q).from + 1); })), el('span', { class: 'val' }, 'frame')),
         this.f('Anchor', this.select(parts, () => g(S.App.project).anchor.part, (v) => this.edit((q) => { g(q).anchor.part = v; })),
           el('button', { class: 'small', title: 'Click the avatar to place it', onclick: () => S.Tools.startPick((a) => S.App.edit((q) => { g(q).anchor = a; })) }, '⌖ Pick')),
         this.f('  across / down', el('span', { style: { display: 'flex', gap: '6px' } },

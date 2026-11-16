@@ -32,11 +32,11 @@ This walks through making a short wave from start to finish. The pictures are fr
 
   <img src="docs/images/02-posing-tools.jpg" alt="The posing tools" width="800">
 
-- **The action** (top bar): the **Id** becomes the file name, the **Name** is what EasyTuber's Actions tab shows, and the **Length** is in milliseconds.
+- **The action** (top bar): the **Id** becomes the file name, the **Name** is what EasyTuber's Actions tab shows, the **Length** is in frames and **fps** is the frame rate (24 by default, as in Animate).
 
   <img src="docs/images/03-action-fields.jpg" alt="The action's Id, Name and Length" width="800">
 
-- **Timeline** (bottom): one row per body part. The yellow diamonds are keyframes.
+- **Timeline** (bottom): laid out like Flash / Adobe Animate. One layer per body part (front to back), groups as folders, a grid of frames with the red playhead. The dots are keyframes.
 
   <img src="docs/images/04-timeline.jpg" alt="The timeline" width="800">
 
@@ -64,7 +64,7 @@ Every part moves on its own. Ctrl+Z undoes anything.
 
 ### 4. Make a wave
 
-1. Press **New**, then set the **Id** (`hello-wave`) and the **Name** (`Hello wave`). Leave the length at 2000 ms.
+1. Press **New**, then set the **Id** (`hello-wave`) and the **Name** (`Hello wave`). Leave the length at 49 frames (2 seconds at 24 fps).
 
    <img src="docs/images/09-new-action.jpg" alt="A new action called hello-wave" width="800">
 
@@ -73,7 +73,7 @@ Every part moves on its own. Ctrl+Z undoes anything.
 
    <img src="docs/images/10-children-follow.jpg" alt="children go with it, ticked for the upper arm" width="800">
 
-4. Keys are always set at the **playhead** (the pink line). Drag it to 500 ms on the ruler, then turn the upper arm up. The forearm comes with it.
+4. Keys are always set at the **playhead** (the red line). Drag it to frame 13 (half a second) on the ruler, then turn the upper arm up. The forearm comes with it.
 
    <img src="docs/images/11-arm-up.jpg" alt="The arm raised at 500 ms" width="800">
 
@@ -81,29 +81,29 @@ Every part moves on its own. Ctrl+Z undoes anything.
 
    <img src="docs/images/12-rest-keys.jpg" alt="Keys for the upper arm, with rest keys at both ends" width="800">
 
-6. Bend the forearm at the elbow so the hand points up. Then wave: at 800 ms tilt the forearm out, at 1100 ms back in, at 1400 ms out again.
+6. Bend the forearm at the elbow so the hand points up. Then wave: at frame 20 tilt the forearm out, at frame 27 back in, at frame 34 out again.
 
    <img src="docs/images/13-wave-keys.jpg" alt="The forearm's wave keys" width="800">
 
-7. To keep the upper arm up while it waves, go to 1500 ms, select it and type `-100` into **Turn** in the Inspector. A typed number sets a key at the playhead, just like a drag. Press **Space** to play.
+7. To keep the upper arm up while it waves, go to frame 37, select it and type `-100` into **Turn** in the Inspector. A typed number sets a key at the playhead, just like a drag. Press **Space** to play.
 
 ### 5. Refine in the timeline
 
-Click **▸** next to a part to open its X, Y, Turn, Size and Opacity rows. Drag a key left or right to retime it.
+Click a frame to select it (the playhead jumps there); drag across frames and layers to select a block. Drag a keyframe left or right to retime it, or drag a selected block to move it all (Alt+drag copies). Click **≡** next to a layer to open its X, Y, Turn, Size and Opacity rows (its motion rows).
 
 <img src="docs/images/14-part-rows.jpg" alt="The upper arm's rows opened" width="800">
 
-Right-click a key to pick its **easing**, how the motion travels to the next key. *outBack* overshoots a little, which feels bouncy.
+Right-click the frames for **Create Classic Tween** / **Remove Tween** and the **easing**, how the motion travels to the next keyframe (blue frames with an arrow tween; grey frames hold still). *outBack* overshoots a little, which feels bouncy. The same menu has Flash's frame commands: Insert Frame (F5), Remove Frames (Shift+F5), Insert Keyframe (F6), Insert Blank Keyframe (F7), Clear Keyframe (Shift+F6), copy / paste frames and Reverse Frames.
 
 <img src="docs/images/15-easing-menu.jpg" alt="The easing menu" width="800">
 
-Drag over empty timeline to draw a box: every key inside it is selected, face keys too. Drag any of them to move them all, or change their easing or value in the Inspector at once. Double-click a row to add a key; **Delete** removes the selected keys; **Esc** clears the selection.
+A block of frames selects every key inside it, face keys too: drag it to move them all, or change their easing or value in the Inspector at once. Double-click a frame to select its whole span; **Delete** removes the selected keys; **Esc** clears the selection. (These pictures show the timeline before it looked like Flash; the steps are the same.)
 
 <img src="docs/images/16-box-select-keys.jpg" alt="Three keys selected with a box" width="800">
 
 ### 6. Several parts at once
 
-Ctrl+click parts, or drag a box over empty stage, to select several. A drag then moves, turns or sizes them as one group around the pivot of the part you grab. **K** keys every selected part; **Ctrl+A** selects every part.
+Ctrl+click parts, or drag a box over empty stage, to select several. A drag then moves, turns or sizes them as one group around the pivot of the part you grab. **K** keys every selected part; **Ctrl+A** selects every part. To keep them together, press **Ctrl+G**: they become a group with motion of its own (see [Groups](#groups)).
 
 <img src="docs/images/17-group-rotate.jpg" alt="The whole head tilted as one group" width="800">
 
@@ -153,10 +153,32 @@ Each part turns and sizes around its **pivot**, the pink crosshair. It starts in
 
 **Joint** mode (`J`) is EasyTuber's own rig motion instead: parts turn around the joints set up in EasyTuber's Part tab, and children always follow.
 
+## The timeline, like Flash / Animate
+
+- **Frames**: the timeline is a grid of frames at the action's frame rate (**fps**, top bar). Frame numbers run along the ruler (1, 5, 10…); the red playhead shows the frame it is on. The action's length is in frames too. A new frame rate keeps every key on its frame, as in Flash, so the action plays faster or slower (**Action > Frame rate: keep the timing** keeps the times instead). EasyTuber still plays the motion smoothly between frames.
+- **Layers**: one per part, the front-most at the top. **Groups** are folders with their parts inside (▸ opens and closes them). The face, sounds and effects have their own folders.
+- **Keyframes**: a filled dot is a keyframe, a hollow dot a blank keyframe (nothing shows from there: the layer's opacity is 0, or a face track goes back to normal). Grey frames hold still; blue frames with an arrow tween to the next keyframe; the hollow box marks a still span's last frame.
+- **The eye and the lock**: the eye hides a layer in the studio (it is still exported); the lock keeps it from being picked on the stage, so a click goes through to what is behind. Alt+click shows (or unlocks) only that layer; the icons above the layers do every layer.
+- **Selecting**: click a frame, drag a block across frames and layers, Shift+click to extend, double-click for a span, Ctrl+Alt+A for every frame. Clicking a layer's frames also selects that part on the stage.
+- **Commands** (right-click, or the keys): `F5` insert frames (as many as are selected) and `Shift+F5` remove them; `F6` insert a keyframe holding what shows there now (on every selected frame) and `Shift+F6` clear keyframes; `F7` insert a blank keyframe; **Create Classic Tween** / **Remove Tween** and the eases; `Ctrl+Alt+C` / `X` / `V` copy / cut / paste frames; `Alt+Backspace` clear frames; **Reverse Frames**. F5 or F6 on frames past the end makes the action longer to reach them. Removing frames from every layer makes it shorter.
+- **Auto keyframe** (bottom bar, on by default): a change on the stage or in the Inspector sets a key at the playhead, as in Animate. Turn it off for Flash's classic way: a change on a frame between keyframes changes the keyframe that frame belongs to.
+- **Onion skin** (bottom bar): the frames before (blue) and after (green) the playhead show faintly on the stage while paused. Pick how many, or drag the markers on the ruler.
+- **Playing**: `Enter` (or `Space`) plays and stops, `Ctrl+Enter` plays from the first frame, `,` `.` and `←` `→` step a frame, `Shift+,` `Shift+.` jump between keyframes.
+
+## Groups
+
+Select some parts (or groups) and press **Ctrl+G** (or **Group** under the layers). A group works like a group in Flash, with motion of its own:
+
+- click any part of it on the stage and the whole group is picked (a cyan box). Drag to move, turn or size the group with the usual tools; keys go on the group's own layer. Its pivot (the crosshair) starts in the middle of its parts: drag it anywhere, Ctrl puts it back.
+- **double-click** the group to edit inside it: clicks then pick its parts (or the groups inside it), and the bar at the top of the stage says where you are. **Esc**, a double-click on empty stage or a click on that bar backs out.
+- each part's own motion goes on inside the group's, so a group can turn while an arm in it waves. Groups can go inside groups. Fading a group fades everything in it.
+- the Inspector's group card has its name (or double-click its name in the timeline), what is in it, its motion, and its pivot. **Ctrl+Shift+G** ungroups: the parts keep their keys, the group's own keys go.
+- groups are part of the exported action, so they play in EasyTuber exactly as in the studio.
+
 ## Making an action
 
-1. Set the **Id** (the file name, letters/digits/`-`/`_`), the **Name** and the **Length** at the top. Tick **Held** for an action that stays on until it is turned off.
-2. Move the playhead (click or drag the ruler) and pose parts on the stage with the tool picked at the top left of the stage:
+1. Set the **Id** (the file name, letters/digits/`-`/`_`), the **Name**, the **Length** (frames) and the frame rate at the top. Tick **Held** for an action that stays on until it is turned off.
+2. Move the playhead (click a frame, or drag the ruler) and pose parts on the stage with the tool picked at the top left of the stage:
    - **Move** (`M`, or hold Shift): put a part anywhere on the stage. The label shows where its pivot is, in stage pixels.
    - **Rotate** (`R`): turn a part around its pivot (Ctrl snaps to 15°).
    - **Scale** (`S`, or hold Alt): drag up to grow, down to shrink.
@@ -164,14 +186,14 @@ Each part turns and sizes around its **pivot**, the pink crosshair. It starts in
    - paused, the stage shows the pose at the playhead at full strength. The blend in/out fades only show while playing, exactly as in EasyTuber.
    - every drag sets a key at the playhead. The first key on a track also adds rest keys at the start and end, so the part moves out of rest and back (turn this off under **Action > Rest keys**).
    - **several parts at once:** Ctrl+click parts (on the stage or their names in the timeline), drag a box on empty stage, or press Ctrl+A. A drag then moves them all by the same amount, or turns or scales them as one group around the pivot of the part you grabbed. A value typed in the Inspector goes on all of them, **K** keys them all, and pasting one part's keys puts them on every selected part.
-3. Refine in the **timeline**: drag keys to retime them, right-click for easing, double-click a row to add a key, **Delete** to remove. Click **▸** on a part to see its Rotate / Move / Scale rows. Drag a box over empty timeline to select every key inside it, across parts and the eyes / mouth / expression rows (Shift adds to the selection; Shift+click picks single keys). Drag any selected key to move them all together, or set their easing or value at once, move them by a number of ms, or delete them. A click on empty timeline moves the playhead; drag the ruler to scrub.
+3. Refine in the **timeline** (see [above](#the-timeline-like-flash--animate)): select frames, drag keyframes to retime them, right-click for tweens and easing, F5 / F6 / F7 for frames and keyframes, **Delete** to remove. Click **≡** on a layer to see its motion rows. Drag the timeline's top edge to make it taller (double-click for the default height); **Ctrl+wheel** (or `-` `=`, or the **− + ↔** buttons) zooms in on time around the mouse, and **Shift+wheel** or the wheel over the ruler scrolls through it.
 4. **Face**: eyes, mouth and expression keys (expressions come from your avatar). A key set to **normal** hands the face back to EasyTuber's blinking and talking.
 5. **Add** effects (sparkles, music notes, motion marks, emoji burst, caption, your own picture), sounds, and **parts in front** (an arm reaching across the face). Effects sit on a point of a part: pick it on the stage with **⌖ Pick**.
 6. **Action** settings: blend in/out, the **Strength** slider EasyTuber shows, the held loop and release, and the media folder.
 
 Pick **My EasyTuber avatar** (top right) to preview on your own avatar, including your own parts. It is read from `%APPDATA%\EASY-TUBER` (macOS: `~/Library/Application Support/EASY-TUBER`), read only.
 
-Keys (also under **?** in the app): `F` `J` free / joint motion · `R` `M` `S` rotate/move/scale tool · `Space` play/pause · `,` `.` previous/next key · `←` `→` nudge the playhead (Shift ×10) · `Ctrl+click` / box: select several parts · `Ctrl+A` every part · `K` key the selected parts · drag on empty timeline: box-select keys (Shift adds) · `Del` delete · `Ctrl+C`/`Ctrl+V` copy/paste keys · `Ctrl+Z`/`Ctrl+Y` · `Ctrl+S` save · `Ctrl+E` export.
+Keys (also under **?** in the app): `F` `J` free / joint motion · `R` `M` `S` rotate/move/scale tool · `Enter` / `Space` play/stop · `Ctrl+Enter` play from the start · `,` `.` `←` `→` previous/next frame · `Shift+,` `Shift+.` previous/next keyframe · `F5` / `Shift+F5` insert / remove frames · `F6` / `Shift+F6` insert / clear keyframe · `F7` blank keyframe · `Ctrl+Alt+C` `X` `V` `A` copy / cut / paste / select all frames · `Ctrl+G` / `Ctrl+Shift+G` group / ungroup · double-click a group: edit inside (`Esc` backs out) · `Ctrl+click` / box: select several parts · `Ctrl+A` every layer · `K` key the selected layers · `Ctrl+wheel` / `-` `=` zoom the timeline · `Del` delete · `Ctrl+C`/`Ctrl+V` copy/paste keys · `Ctrl+Z`/`Ctrl+Y` · `Ctrl+S` save · `Ctrl+E` export.
 
 ## Tutorial video
 
