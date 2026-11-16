@@ -1,7 +1,7 @@
 {
   "name": "easytuber-animation-studio",
   "productName": "EasyTuber Animation Studio",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Keyframe EasyTuber actions on the real rig and export the action file.",
   "main": "electron/main.js",
   "private": true,
