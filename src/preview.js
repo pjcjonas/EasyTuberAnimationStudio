@@ -2,7 +2,11 @@
    studio is about to export. The frame is built in the same order as EasyTuber's app.js frame().
 
    Time is the studio's: the playhead (ms) is pushed into the running action every frame by moving
-   its start time, so scrubbing, pausing and playing all go through the real engine. */
+   its start time, so scrubbing, pausing and playing all go through the real engine.
+
+   The studio only: layers hidden with the timeline's eye aren't drawn (they are still exported), and
+   while paused the onion skin draws the frames around the playhead faintly underneath, earlier ones
+   blue and later ones green (as in Animate), each one the real engine at that frame. */
 (function (S) {
   const PT = window.PT, M = PT.M;
   const SEED = 0x5eed;          // the same random choices every time, so effects hold still while scrubbing
@@ -22,6 +26,7 @@
     onTick: null,               // (ms) -> void, every frame (playhead)
     onStopped: null,            // a held action finished blending out
     overlay: null,              // (ctx, pose) -> void, drawn on top (stage tools)
+    onion: { on: false, before: 2, after: 2 },   // frames shown either side of the playhead
     last: 0,
 
     init(canvas) {
@@ -255,21 +260,79 @@
       }
 
       R.resize();
-      const pose = R.computePose(rig, act ? PT.Actions.mergeDeltas(anim.deltas, act.deltas) : anim.deltas);
-      if (act) PT.Actions.setPose(pose, R);
-      this.clear();
-      if (act) PT.Actions.draw('behind', R);
-      const states = { ...anim.states, expression: '', ...(act ? act.states : {}) };
-      R.drawRigFx(rig, pose, states, {
-        order: act ? PT.Actions.drawOrder(rig.order) : null,
-        fx: act && PT.Actions.hasPartFx ? (id) => PT.Actions.partFx(id) : null,
-      }, PT.stageFx(rig.stage, anim.vol, false));
-      if (act) PT.Actions.draw('front', R);
-      this.lastPose = pose; this.lastStates = states;
+      // layers hidden in the timeline: left out of this frame only
+      const hidden = [];
+      if (S.App && S.App.project) for (const id of S.App.hiddenParts()) if (rig.parts[id] && rig.parts[id].visible) { rig.parts[id].visible = false; hidden.push(id); }
+      try {
+        const pose = R.computePose(rig, act ? PT.Actions.mergeDeltas(anim.deltas, act.deltas) : anim.deltas);
+        this.clear();
+        if (this.onion.on && !this.playing && act) this.drawOnion(now, rig, anim);
+        if (act) PT.Actions.setPose(pose, R);
+        if (act) PT.Actions.draw('behind', R);
+        const states = { ...anim.states, expression: '', ...(act ? act.states : {}) };
+        R.drawRigFx(rig, pose, states, {
+          order: act ? PT.Actions.drawOrder(rig.order) : null,
+          fx: act && PT.Actions.hasPartFx ? (id) => PT.Actions.partFx(id) : null,
+        }, PT.stageFx(rig.stage, anim.vol, false));
+        if (act) PT.Actions.draw('front', R);
+        this.lastPose = pose; this.lastStates = states;
+      } finally {
+        for (const id of hidden) rig.parts[id].visible = true;
+      }
       if (this.fitNext && R.canvas.width > 1) { this.fitNext = false; this.fitAvatar(); }
-      if (this.overlay) this.overlay(R.ctx, pose);
+      if (this.overlay) this.overlay(R.ctx, this.lastPose);
       if (this.onTick) this.onTick(this.timelineMs());
     },
+  };
+
+  /* The onion skin: the action at the frames around the playhead, each drawn off screen, tinted and
+     put under the stage faintly (nearer frames stronger). The run is put back afterwards. */
+  Preview.drawOnion = function (now, rig, anim) {
+    const run = PT.Actions.running.find((r) => r.def === this.def), p = this.project;
+    if (!run || run.releaseAt != null || !p) return;
+    const R = this.renderer, main = R.ctx, M = S.Model;
+    const c = this.onionCanvas || (this.onionCanvas = document.createElement('canvas'));
+    if (c.width !== R.canvas.width || c.height !== R.canvas.height) { c.width = R.canvas.width; c.height = R.canvas.height; }
+    const g = c.getContext('2d');
+    const t0 = run.t0, sounds = run.sounds, f = M.toFrame(p, this.timelineMs()), last = M.frameCount(p) - 1;
+    const end = this.def.hold ? Infinity : this.def.duration - 0.5;
+    try {
+      for (const [dir, n, tint] of [[-1, this.onion.before, 'rgba(70,130,255,.6)'], [1, this.onion.after, 'rgba(70,215,130,.6)']]) {
+        for (let i = n; i >= 1; i--) {
+          const at = f + dir * i;
+          if (at < 0 || at > last) continue;
+          run.t0 = now - Math.min(M.toMs(p, at), end);
+          run.sounds = new Map(sounds || []);   // nothing heard from the ghosts
+          run.state.free = null;
+          const act = PT.Actions.update(now, rig);
+          if (!act) break;
+          const pose = R.computePose(rig, PT.Actions.mergeDeltas(anim.deltas, act.deltas));
+          PT.Actions.setPose(pose, R);
+          g.setTransform(1, 0, 0, 1, 0, 0);
+          g.globalCompositeOperation = 'source-over';
+          g.clearRect(0, 0, c.width, c.height);
+          R.ctx = g;
+          try {
+            R.drawRig(rig, pose, { ...anim.states, expression: '', ...act.states }, {
+              order: PT.Actions.drawOrder(rig.order),
+              fx: PT.Actions.hasPartFx ? (id) => PT.Actions.partFx(id) : null,
+            });
+          } finally { R.ctx = main; }
+          g.setTransform(1, 0, 0, 1, 0, 0);
+          g.globalCompositeOperation = 'source-atop';
+          g.fillStyle = tint;
+          g.fillRect(0, 0, c.width, c.height);
+          main.save();
+          main.setTransform(1, 0, 0, 1, 0, 0);
+          main.globalAlpha = 0.45 * (1 - (i - 1) / (n + 1));
+          main.drawImage(c, 0, 0);
+          main.restore();
+        }
+      }
+    } finally {
+      run.t0 = t0; run.sounds = sounds; run.state.free = null;
+      PT.Actions.update(now, rig);   // the engine back at the playhead
+    }
   };
 
   S.Preview = Preview;

@@ -7,10 +7,16 @@
 
   const App = {
     project: null, filePath: null, dirty: false,
-    sel: { part: null, parts: new Set(), keys: new Set(), item: null },   // part = the one clicked last
+    /* part = the one clicked last; parts = the selected parts and groups ("nodes"); keys = selected
+       keys; item = a sound / effect / bar / face key; frames = the frames selected in the timeline
+       { rows: Set of row ids, f0, f1 } (see timeline.js) */
+    sel: { part: null, parts: new Set(), keys: new Set(), item: null, frames: null },
     undoStack: [], redoStack: [],
     dragSnap: null, lastCoalesce: null,
-    autoRest: true, stretch: false,
+    autoRest: true, stretch: false, keepTiming: false,
+    autoKey: true,                 // off: a change on a frame between keys changes the key before it (Flash's classic way)
+    hidden: new Set(), locked: new Set(),   // layers (parts and groups) hidden or locked in the studio (the eye and lock)
+    entered: null,                 // the group being edited inside (double-click a group, like Flash), or null
     clip: null,
     code: '', issues: [],
     mediaSent: '',
@@ -32,8 +38,9 @@
     load(project, filePath) {
       this.project = S.Model.normalize(project);
       this.filePath = filePath;
-      this.sel = { part: null, parts: new Set(), keys: new Set(), item: null };
+      this.sel = { part: null, parts: new Set(), keys: new Set(), item: null, frames: null };
       this.undoStack = []; this.redoStack = [];
+      this.hidden = new Set(); this.locked = new Set(); this.entered = null;
       S.Preview.settings = {};
       S.Preview.ms = 0; S.Preview.playing = false;
       this.setDirty(false);
@@ -127,26 +134,29 @@
         if (s.parts.has(id)) { s.parts.delete(id); if (s.part === id) s.part = [...s.parts].pop() || null; } else { s.parts.add(id); s.part = id; }
       } else if (how === 'primary' && id && s.parts.has(id)) s.part = id;
       else { s.parts = new Set(id ? [id] : []); s.part = id || null; }
-      if (!keepKeys) s.keys = new Set();
+      if (!keepKeys) { s.keys = new Set(); s.frames = null; }
       s.item = null;
       this.refresh();
     },
+    isNode(id) { return !!(PT.PART[id] || S.Model.groupById(this.project, id)); },
     selectParts(ids) {
-      const list = [...new Set(ids)].filter((id) => PT.PART[id]);
+      const list = [...new Set(ids)].filter((id) => this.isNode(id));
       this.sel.parts = new Set(list);
       if (!list.includes(this.sel.part)) this.sel.part = list[list.length - 1] || null;
       this.sel.keys = new Set();
       this.sel.item = null;
+      this.sel.frames = null;
       this.refresh();
     },
-    // the selected parts, in skeleton order
+    // the selected parts and groups: groups first (in the order they were made), then parts in skeleton order
     selectedParts() {
-      const order = PT.PARTS.map((d) => d.id);
+      const order = [...this.project.groups.map((g) => g.id), ...PT.PARTS.map((d) => d.id)];
       return [...this.sel.parts].sort((a, b) => order.indexOf(a) - order.indexOf(b));
     },
     select(item) {
       this.sel.item = item;
       this.sel.keys = new Set();
+      this.sel.frames = null;
       if (item && item.kind !== 'effect') { this.sel.part = null; this.sel.parts = new Set(); }
       this.refresh();
     },
@@ -157,7 +167,8 @@
     },
     cleanSelection() {
       const p = this.project;
-      this.sel.parts = new Set([...this.sel.parts].filter((id) => PT.PART[id]));
+      this.sel.parts = new Set([...this.sel.parts].filter((id) => this.isNode(id)));
+      if (this.entered && !S.Model.groupById(p, this.entered)) this.entered = null;
       if (this.sel.part && !this.sel.parts.has(this.sel.part)) this.sel.part = [...this.sel.parts].pop() || null;
       this.sel.keys = new Set([...this.sel.keys].filter((k) => {
         const [part, prop, t] = k.split('|');
@@ -166,6 +177,68 @@
       }));
       const it = this.sel.item;
       if (it && ((it.kind === 'effect' && !p.effects.some((x) => x.id === it.id)) || (it.kind === 'sound' && !p.sounds[it.i]) || (it.kind === 'front' && !p.inFront[it.i]) || (it.kind === 'state' && !p.states[it.name].some((x) => x.t === it.t)))) this.sel.item = null;
+    },
+
+    /* ---------- layers: the eye and the lock, groups ---------- */
+    // a part or group is hidden / locked when it is, or a group around it is
+    layerHidden(id) { return this.hidden.has(id) || S.Model.groupChain(this.project, id).some((g) => this.hidden.has(g)); },
+    layerLocked(id) { return this.locked.has(id) || S.Model.groupChain(this.project, id).some((g) => this.locked.has(g)); },
+    hiddenParts() { return new Set(PT.PARTS.map((d) => d.id).filter((id) => this.layerHidden(id))); },
+    toggleLayer(kind, id, only = false) {
+      const set = this[kind];
+      if (only) {
+        // Alt+click (Flash): this layer alone shows / stays unlocked, or every layer back on
+        const all = this.layerIds().filter((x) => x !== id);
+        const allOn = all.every((x) => set.has(x)) && !set.has(id);
+        this[kind] = allOn ? new Set() : new Set(all);
+      } else if (set.has(id)) set.delete(id); else set.add(id);
+      if (kind === 'locked') this.sel.parts = new Set([...this.sel.parts].filter((x) => !this.layerLocked(x)));
+      this.refresh();
+    },
+    // every layer id: groups, then parts
+    layerIds() { return [...this.project.groups.map((g) => g.id), ...PT.PARTS.map((d) => d.id)]; },
+    toggleAllLayers(kind) {
+      const ids = this.layerIds();
+      this[kind] = ids.every((x) => this[kind].has(x)) ? new Set() : new Set(ids);
+      if (kind === 'locked') this.sel.parts = new Set();
+      this.refresh();
+    },
+
+    /* Ctrl+G: the selected parts and groups become a group (inside the group being edited) */
+    groupSelection() {
+      const ids = this.selectedParts();
+      if (!ids.length) { PT.toast('Select the parts to group first (Ctrl+click or drag a box on the stage).'); return; }
+      let gid = null;
+      this.edit((q) => { gid = S.Model.makeGroup(q, ids); });
+      if (!gid) { PT.toast('No more groups can be made.', 'warn'); return; }
+      S.Timeline.openFolder(gid);
+      this.selectParts([gid]);
+      PT.toast(`${S.Model.groupById(this.project, gid).name}: ${ids.length} item${ids.length > 1 ? 's' : ''} grouped. Double-click it on the stage to edit inside it.`, 'ok');
+    },
+    /* Ctrl+Shift+G: break the selected groups apart */
+    ungroupSelection() {
+      const groups = this.selectedParts().filter((id) => S.Model.isGroup(id));
+      if (!groups.length) { PT.toast('Select a group to ungroup.'); return; }
+      const keyed = groups.filter((g) => this.project.tracks[g]);
+      if (keyed.length && !window.confirm(`Ungrouping removes the group's own motion (its keys). The parts keep theirs. Ungroup?`)) return;
+      const members = groups.flatMap((g) => S.Model.groupById(this.project, g).members);
+      this.edit((q) => { for (const g of groups) S.Model.ungroup(q, g); });
+      if (groups.includes(this.entered)) this.entered = null;
+      this.selectParts(members);
+    },
+    renameGroup(gid, name) { this.edit((q) => { const g = S.Model.groupById(q, gid); if (g) g.name = String(name).trim().slice(0, 40) || g.id; }); },
+    /* editing inside a group (double-click it on the stage): clicks pick what is in it */
+    enterGroup(gid) {
+      this.entered = gid && S.Model.groupById(this.project, gid) ? gid : null;
+      if (this.entered) S.Timeline.openFolder(this.entered);
+      this.refresh();
+    },
+    exitGroup() {
+      const was = this.entered;
+      if (!was) return false;
+      this.entered = S.Model.groupOf(this.project, was);
+      this.selectParts([was]);
+      return true;
     },
 
     deleteSelection() {
@@ -194,6 +267,10 @@
 
     /* ---------- time ---------- */
     playhead() { return S.Preview.timelineMs(); },
+    frame() { return S.Model.toFrame(this.project, this.playhead()); },
+    lastFrame() { return S.Model.frameCount(this.project) - 1; },
+    seekFrame(f) { this.seek(S.Model.toMs(this.project, Math.max(0, Math.min(this.lastFrame(), f)))); },
+    stepFrame(n) { this.pause(); this.seekFrame(this.frame() + n); },
     seek(ms) { S.Preview.seek(ms); S.Timeline.placeLine(); S.Inspector.sync(); this.tick(S.Preview.timelineMs()); },
     pause() { if (S.Preview.playing) { S.Preview.pause(); this.tick(this.playhead()); S.Inspector.sync(); } },
     togglePlay() { S.Preview.toggle(); this.tick(this.playhead()); },
@@ -204,7 +281,8 @@
       if (shown !== this.lastShown || P.playing !== this.lastPlaying) {
         const was = this.lastPlaying;
         this.lastShown = shown; this.lastPlaying = P.playing;
-        $('timeReadout').textContent = `${shown} / ${this.project.duration} ms`;
+        const p = this.project, f = S.Model.toFrame(p, ms);
+        $('timeReadout').textContent = `frame ${f + 1} / ${S.Model.frameCount(p)} · ${(shown / 1000).toFixed(2)} s`;
         $('btnPlay').textContent = P.playing ? '❚❚' : '▶';
         S.Timeline.placeLine();
         if (!P.playing || was !== P.playing) S.Inspector.sync();
@@ -241,14 +319,23 @@
       }
       S.Model.setKey(q, part, prop, t, v);
     },
-    // key the properties a part already moves (or its rotation) at time t, with their values there
+    // key the properties a part (or group) already moves (or where it is and its turn) at time t
     keyPartAt(q, id, t) {
-      const tr = q.tracks[id] || {};
-      const mine = Object.keys(tr).filter((prop) => S.Tools.props.includes(prop));
-      const props = mine.length ? mine : S.Tools.space === 'free' ? ['x', 'y', 'angle'] : ['rot'];
+      const tr = q.tracks[id] || {}, group = S.Model.isGroup(id);
+      const space = group ? S.Model.FREE_PROPS : S.Tools.props;
+      const mine = Object.keys(tr).filter((prop) => space.includes(prop));
+      const props = mine.length ? mine : group || S.Tools.space === 'free' ? ['x', 'y', 'angle'] : ['rot'];
       for (const prop of props) this.keyValue(q, id, prop, t, S.Model.valueAt(q, id, prop, t));
     },
     keyPart(id) { this.keyParts(id ? [id] : []); },
+    /* Where a change made at time t is keyed. Auto keyframe on (the default): at t. Off, as in
+       Flash's classic tweens: on the keyframe that frame belongs to (the last one at or before it). */
+    keyTime(id, t, q = this.project) {
+      t = Math.round(t);
+      if (this.autoKey) return t;
+      const times = Object.values(q.tracks[id] || {}).flatMap((keys) => keys.map((k) => k.t)).filter((x) => x <= t);
+      return times.length ? Math.max(...times) : t;
+    },
     // key several parts at the playhead in one step (K keys every selected part)
     keyParts(ids) {
       ids = (ids || []).filter(Boolean);
@@ -258,34 +345,43 @@
     },
     // one property set to the same value on several parts, keyed at time t
     setOnParts(ids, prop, t, v, opts) {
-      this.edit((q) => { for (const id of ids) this.keyValue(q, id, prop, t, v); }, opts);
+      this.edit((q) => { for (const id of ids) this.keyValue(q, id, prop, this.keyTime(id, t, q), v); }, opts);
     },
 
-    copyKeys() {
-      const keys = [...this.sel.keys].map((s) => { const [part, prop, t] = s.split('|'); return { part, prop, t: +t }; }).filter((k) => !k.part.startsWith('state:'));
+    copyKeys(quiet = false) {
+      const p = this.project;
+      const keys = [...this.sel.keys].map((s) => { const [part, prop, t] = s.split('|'); return { part, prop, t: +t }; });
       if (!keys.length) return;
-      const base = Math.min(...keys.map((k) => k.t));
-      this.clip = keys.map((k) => { const x = S.Model.track(this.project, k.part, k.prop).find((y) => y.t === k.t); return { part: k.part, prop: k.prop, dt: k.t - base, v: x.v, ease: x.ease }; });
-      PT.toast(`${keys.length} key${keys.length > 1 ? 's' : ''} copied`);
+      // from the first selected frame (a key later in the selection keeps its distance from it)
+      const f0 = this.sel.frames ? this.sel.frames.f0 : S.Model.toFrame(p, Math.min(...keys.map((k) => k.t)));
+      const base = S.Model.toMs(p, f0);
+      this.clip = keys.map((k) => {
+        if (k.part.startsWith('state:')) { const x = p.states[k.part.slice(6)].find((y) => y.t === k.t); return x && { part: k.part, prop: 'v', dt: k.t - base, v: x.v }; }
+        const x = S.Model.track(p, k.part, k.prop).find((y) => y.t === k.t);
+        return x && { part: k.part, prop: k.prop, dt: k.t - base, v: x.v, ease: x.ease };
+      }).filter(Boolean);
+      if (!quiet) PT.toast(`${keys.length} key${keys.length > 1 ? 's' : ''} copied`);
     },
     pasteKeys() {
       if (!this.clip) return;
-      const t = Math.round(this.playhead());
-      const parts = new Set(this.clip.map((k) => k.part));
+      const t = this.sel.frames ? S.Model.toMs(this.project, this.sel.frames.f0) : Math.round(this.playhead());
+      const parts = new Set(this.clip.filter((k) => !k.part.startsWith('state:')).map((k) => k.part));
       // one part's keys, with other parts selected: they go on every selected part
       const sel = this.selectedParts();
       const onto = parts.size === 1 && sel.length && !(sel.length === 1 && parts.has(sel[0])) ? sel : null;
       const added = [];
       this.edit((q) => {
         for (const k of this.clip) {
+          const at = Math.min(q.duration, S.Model.snapMs(q, t + k.dt));
+          if (k.part.startsWith('state:')) { S.Model.setStateKey(q, k.part.slice(6), at, k.v); added.push(`${k.part}|v|${at}`); continue; }
           for (const part of onto || [k.part]) {
-            const at = Math.min(q.duration, t + k.dt);
             S.Model.setKey(q, part, k.prop, at, k.v, k.ease);
             added.push(`${part}|${k.prop}|${at}`);
           }
         }
       });
       this.sel.keys = new Set(added);
+      this.sel.frames = null;
       this.refresh();
     },
 
@@ -298,7 +394,7 @@
       }
       this.edit((q) => S.Model.setStateKey(q, name, t, v));
       const at = Math.max(0, Math.min(this.project.duration, Math.round(t)));
-      this.sel = { part: null, parts: new Set(), keys: new Set([`state:${name}|v|${at}`]), item: { kind: 'state', name, t: at } };
+      this.sel = { part: null, parts: new Set(), keys: new Set([`state:${name}|v|${at}`]), item: { kind: 'state', name, t: at }, frames: null };
       this.refresh();
     },
 
@@ -457,7 +553,7 @@
       m.replaceChildren(...items.map((it) => {
         if (it.sep) return el('hr');
         if (it.label) return el('div', { class: 'lbl' }, it.label);
-        return el('button', { class: it.cur ? 'cur' : '', onclick: () => { m.hidden = true; it.run(); } }, it.text);
+        return el('button', { class: it.cur ? 'cur' : '', disabled: !!it.disabled, onclick: () => { m.hidden = true; it.run(); } }, el('span', {}, it.text), it.key ? el('kbd', {}, it.key) : null);
       }));
       m.hidden = false;
       const r = m.getBoundingClientRect();
@@ -474,9 +570,15 @@
       try { runtime = (await (await fetch('runtime/easytuber/VERSION')).text()).trim(); } catch (e) { /* unknown */ }
       const a = (href, text) => el('a', { href, target: '_blank', rel: 'noopener' }, text);
       const keys = [
-        ['F  J', 'free motion (anywhere, your own pivot) / EasyTuber joints'], ['R  M  S', 'rotate / move / scale tool (Shift: move, Alt: scale)'], ['drag pivot', 'move a part\'s pivot anywhere (Ctrl snaps)'], ['Space', 'play / pause'], [', .', 'previous / next key'], ['← →', 'move the playhead (Shift: 100 ms)'],
-        ['Ctrl+click', 'select several parts (stage or timeline)'], ['drag on stage', 'box-select parts'], ['Ctrl+A', 'select every part'],
-        ['K', 'key the selected parts'], ['drag', 'on empty timeline: box-select keys (Shift adds)'], ['Ctrl+C / V', 'copy / paste keys (onto the selected parts)'],
+        ['F  J', 'free motion (anywhere, your own pivot) / EasyTuber joints'], ['R  M  S', 'rotate / move / scale tool (Shift: move, Alt: scale)'], ['drag pivot', 'move a part\'s (or group\'s) pivot anywhere (Ctrl snaps)'],
+        ['Enter, Space', 'play / stop'], ['Ctrl+Enter', 'play from the first frame'], [', .  ← →', 'previous / next frame (Shift+arrow: 10)'], ['Shift+, .', 'previous / next keyframe'], ['Home  End', 'first / last frame'],
+        ['F5', 'insert frame (Shift+F5: remove frames)'], ['F6', 'insert keyframe (Shift+F6: clear keyframe)'], ['F7', 'insert blank keyframe'],
+        ['drag frames', 'select frames; drag a keyframe or the selection to move it (Alt+drag copies)'], ['double-click', 'a frame: select its span'],
+        ['Ctrl+Alt+C / X / V', 'copy / cut / paste frames'], ['Ctrl+Alt+A', 'select all frames'], ['Alt+Backspace', 'clear frames'],
+        ['Ctrl+G', 'group the selected parts (Ctrl+Shift+G: ungroup)'], ['double-click', 'a group on the stage: edit inside it (Esc: back out)'],
+        ['Ctrl+click', 'select several parts (stage or timeline)'], ['drag on stage', 'box-select parts'], ['Ctrl+A', 'select every layer'],
+        ['K', 'key the selected layers at the playhead'], ['Ctrl+C / V', 'copy / paste keys'],
+        ['Ctrl+wheel, - =', 'zoom the timeline (Shift+wheel scrolls it); drag its top edge for height'],
         ['Del', 'delete'], ['Ctrl+Z / Y', 'undo / redo'], ['Ctrl+S, Ctrl+E', 'save, export'],
       ];
       box.replaceChildren(
@@ -499,7 +601,9 @@
       const p = this.project, a = document.activeElement;
       if (a !== $('fId')) $('fId').value = p.id;
       if (a !== $('fLabel')) $('fLabel').value = p.label;
-      if (a !== $('fDuration')) $('fDuration').value = p.duration;
+      if (a !== $('fDuration')) $('fDuration').value = S.Model.frameCount(p);
+      $('fFps').value = p.fps;
+      $('fSeconds').textContent = `${(p.duration / 1000).toFixed(2)} s`;
       $('fHold').checked = p.hold;
       $('heldControls').hidden = !p.hold;
       $('loopWrap').hidden = p.hold;
@@ -537,9 +641,14 @@
       on('fLabel', 'change', (e) => this.edit((q) => { q.label = e.target.value.trim().slice(0, 60) || q.id; }));
       on('fDuration', 'change', (e) => {
         const v = parseFloat(e.target.value);
-        if (!Number.isFinite(v)) { e.target.value = this.project.duration; return; }
-        this.edit((q) => S.Model.setDuration(q, v, this.stretch));
+        if (!Number.isFinite(v)) { e.target.value = S.Model.frameCount(this.project); return; }
+        this.edit((q) => S.Model.setDuration(q, S.Model.framesToDuration(q, v), this.stretch));
         S.Preview.seek(Math.min(S.Preview.ms, this.project.duration));
+      });
+      on('fFps', 'change', (e) => {
+        const f = this.frame();
+        this.edit((q) => S.Model.setFps(q, +e.target.value, this.keepTiming));
+        this.seekFrame(f);
       });
       on('fHold', 'change', (e) => {
         this.pause();
@@ -551,6 +660,8 @@
       on('btnStart', 'click', () => { this.pause(); this.seek(0); });
       on('btnPrevKey', 'click', () => this.jumpKey(-1));
       on('btnNextKey', 'click', () => this.jumpKey(1));
+      on('btnPrevFrame', 'click', () => this.stepFrame(-1));
+      on('btnNextFrame', 'click', () => this.stepFrame(1));
       on('btnHeldOn', 'click', () => { S.Preview.ms = 0; S.Preview.play(); });
       on('btnHeldOff', 'click', () => S.Preview.turnOff());
       on('optLoop', 'change', (e) => { S.Preview.loop = e.target.checked; });
@@ -571,6 +682,21 @@
     key(e) {
       const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) && e.target.type !== 'checkbox' && e.target.type !== 'range';
       const ctrl = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+      // the timeline's frame commands (Flash's keys); F-keys work even from a field
+      const T = S.Timeline;
+      if (/^F[567]$/.test(e.key) && !ctrl) {
+        e.preventDefault();
+        if (e.key === 'F5') { if (e.shiftKey) T.removeFrames(); else T.insertFrames(); }
+        else if (e.key === 'F6') { if (e.shiftKey) T.clearKeyframes(); else T.insertKeyframes(false); }
+        else if (!e.shiftKey) T.insertKeyframes(true);
+        return;
+      }
+      if (ctrl && e.altKey && !typing) {
+        const frameCmd = { c: () => T.copyFrames(), x: () => T.cutFrames(), v: () => T.pasteFrames(), a: () => T.selectAllFrames() }[k];
+        if (frameCmd) { e.preventDefault(); frameCmd(); return; }
+      }
+      if (ctrl && k === 'g' && !typing) { e.preventDefault(); if (e.shiftKey) this.ungroupSelection(); else this.groupSelection(); return; }
+      if (ctrl && e.key === 'Enter') { e.preventDefault(); this.pause(); this.seek(0); this.togglePlay(); return; }
       if (ctrl) {
         const map = { s: () => this.save(e.shiftKey), o: () => this.open(), n: () => this.newProject(), e: () => this.exportSave() };
         if (map[k]) { e.preventDefault(); map[k](); return; }
@@ -579,23 +705,30 @@
         if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); this.redo(); return; }
         if (k === 'c') { e.preventDefault(); this.copyKeys(); return; }
         if (k === 'v') { e.preventDefault(); this.pasteKeys(); return; }
-        if (k === 'a') { e.preventDefault(); this.selectParts(PT.PARTS.filter((d) => S.Preview.rig.parts[d.id] && S.Preview.rig.parts[d.id].visible).map((d) => d.id)); return; }
+        if (k === 'a') { e.preventDefault(); this.selectParts(S.Tools.topLevel().filter((id) => !this.layerLocked(id))); return; }
         return;
       }
       if (typing) return;
       const d = this.project.duration;
+      if (e.code === 'Comma' || e.code === 'Period') {   // , . frame by frame; Shift: keyframe to keyframe
+        const dir = e.code === 'Comma' ? -1 : 1;
+        if (e.shiftKey) this.jumpKey(dir); else this.stepFrame(dir);
+        return;
+      }
       switch (e.key) {
         case ' ': e.preventDefault(); this.togglePlay(); break;
+        case 'Enter': e.preventDefault(); this.togglePlay(); break;
         case 'Home': this.pause(); this.seek(0); break;
         case 'End': this.pause(); this.seek(d); break;
-        case ',': this.jumpKey(-1); break;
-        case '.': this.jumpKey(1); break;
-        case 'ArrowLeft': e.preventDefault(); this.pause(); this.seek(Math.round(this.playhead()) - (e.shiftKey ? 100 : 10)); break;
-        case 'ArrowRight': e.preventDefault(); this.pause(); this.seek(Math.round(this.playhead()) + (e.shiftKey ? 100 : 10)); break;
-        case 'Delete': case 'Backspace': this.deleteSelection(); break;
+        case 'ArrowLeft': e.preventDefault(); this.stepFrame(e.shiftKey ? -10 : -1); break;
+        case 'ArrowRight': e.preventDefault(); this.stepFrame(e.shiftKey ? 10 : 1); break;
+        case 'Delete': this.deleteSelection(); break;
+        case 'Backspace': if (e.altKey) T.clearFrames(); else this.deleteSelection(); break;
+        case '=': case '+': S.Timeline.zoomBy(1.5); break;
+        case '-': S.Timeline.zoomBy(1 / 1.5); break;
         case 'Escape':
           if (S.Tools.picking) S.Tools.stopPick();
-          else { this.sel = { part: null, parts: new Set(), keys: new Set(), item: null }; this.refresh(); }
+          else if (!this.exitGroup()) { this.sel = { part: null, parts: new Set(), keys: new Set(), item: null, frames: null }; this.refresh(); }
           $('ctxMenu').hidden = true;
           break;
         default:

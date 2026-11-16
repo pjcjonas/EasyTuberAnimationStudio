@@ -55,11 +55,56 @@
   }
 
   // the free motion: per part, a map of the stage (rotate + scale + move) built once a frame, children
-  // going with their parent; parts() hands the renderer each part's share of it
+  // going with their parent and groups carrying their parts; parts() hands the renderer each part's
+  // share of it
   function freeSource(p, free, env, strength) {
     const pivots = {};
     for (const [part, pv] of Object.entries(p.pivots)) pivots[part] = pv.joint ? 'joint' : [pv.u, pv.v];
     const linked = Object.keys(p.follow).filter((k) => p.follow[k] === true);
+    const groups = {}, groupOf = {};
+    for (const g of p.groups) {
+      groups[g.id] = { up: Model.groupOf(p, g.id), parts: Model.groupParts(p, g.id), pivot: [g.pivot.x, g.pivot.y] };
+      for (const m of g.members) groupOf[m] = g.id;
+    }
+    const groupCode = p.groups.length ? `
+  // groups: their parts (and the groups inside them) move, turn, size and fade together around the
+  // middle of the group's parts, moved by pivot (stage pixels); up = the group this one is in
+  const GROUPS = ${J(groups)};
+  // the group each part or group is in
+  const GROUP_OF = ${J(groupOf)};
+  // a group's map of the stage (with the groups around it), and where its pivot is drawn
+  function groupMaps(a, ms, k) {
+    const maps = {}, alpha = {}, pivot = {};
+    const make = (g) => {
+      if (maps[g]) return maps[g];
+      const G = GROUPS[g], f = FREE[g] || {}, up = G.up ? make(G.up) : null;
+      const val = (prop, rest) => (f[prop] ? rest + (sample(f[prop], ms) - rest) * k : rest);
+      let px = 0, py = 0, n = 0;
+      for (const id of G.parts) if (PT.PART[id]) { const q = a.atArt(id, 0.5, 0.5); px += q[0]; py += q[1]; n++; }
+      px = px / Math.max(1, n) + G.pivot[0]; py = py / Math.max(1, n) + G.pivot[1];
+      const turn = val('angle', 0) * Math.PI / 180, size = Math.max(0, val('size', 1));
+      const c = size * Math.cos(turn), s = size * Math.sin(turn), x = val('x', 0), y = val('y', 0);
+      const own = [c, s, px + x - (c * px - s * py), py + y - (s * px + c * py)];
+      maps[g] = up ? mapThen(up, own) : own;
+      alpha[g] = (G.up ? alpha[G.up] : 1) * (f.opacity ? Math.max(0, Math.min(1, val('opacity', 1))) : 1);
+      pivot[g] = up ? mapPoint(up, px + x, py + y) : [px + x, py + y];
+      return maps[g];
+    };
+    for (const g of Object.keys(GROUPS)) make(g);
+    return { maps, alpha, pivot };
+  }` : '';
+    const groupApply = p.groups.length ? `
+    // a part in a group goes with it (a part linked to its parent goes with its parent's group)
+    const groups = groupMaps(a, ms, k), inGroup = {};
+    for (const d of PT.PARTS) {
+      const g = GROUP_OF[d.id] || (d.parent && LINKED.includes(d.parent) ? inGroup[d.parent] : null);
+      if (!g) continue;
+      inGroup[d.id] = g;
+      maps[d.id] = maps[d.id] ? mapThen(groups.maps[g], maps[d.id]) : groups.maps[g];
+      if (groups.alpha[g] !== 1) alpha[d.id] = (alpha[d.id] ?? 1) * groups.alpha[g];
+    }
+    return (st.free = { t: now, maps, alpha, groups: groups.maps, pivots: groups.pivot });` : `
+    return (st.free = { t: now, maps, alpha });`;
     return `
   // free motion on the 1920x1080 stage: [ms, value, ease to the next key]. x / y in stage pixels,
   // angle in degrees (clockwise), size 1 = as drawn, opacity 0..1; around each part's pivot
@@ -103,9 +148,8 @@
         if (f.opacity) alpha[d.id] = Math.max(0, Math.min(1, val('opacity', 1)));
       }
       if (m) maps[d.id] = m;
-    }
-    return (st.free = { t: now, maps, alpha });
-  }`;
+    }${groupApply}
+  }${groupCode}`;
   }
 
   function statesSource(p) {
